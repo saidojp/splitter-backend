@@ -9,10 +9,14 @@ function generateUniqueId() {
   return "USER#" + Math.floor(1000 + Math.random() * 9000);
 }
 
-// registration
+// Регистрация
 router.post("/register", async (req, res) => {
   try {
     const { email, password, username } = req.body;
+
+    if (!email || !password || !username) {
+      return res.status(400).json({ error: "Заполните все поля" });
+    }
 
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
@@ -23,12 +27,7 @@ router.post("/register", async (req, res) => {
     const uniqueId = generateUniqueId();
 
     const user = await prisma.user.create({
-      data: {
-        email,
-        password: hashedPassword,
-        username,
-        uniqueId,
-      },
+      data: { email, password: hashedPassword, username, uniqueId },
     });
 
     const token = jwt.sign(
@@ -48,7 +47,7 @@ router.post("/register", async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Server Error" });
+    res.status(500).json({ error: "Ошибка сервера" });
   }
 });
 
@@ -57,14 +56,18 @@ router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    if (!email || !password) {
+      return res.status(400).json({ error: "Заполните все поля" });
+    }
+
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      return res.status(400).json({ error: "Неверный email or password" });
+      return res.status(400).json({ error: "Неверный email или пароль" });
     }
 
     const isValid = await bcrypt.compare(password, user.password);
     if (!isValid) {
-      return res.status(400).json({ error: "Неверный email or password" });
+      return res.status(400).json({ error: "Неверный email или пароль" });
     }
 
     const token = jwt.sign(
@@ -84,7 +87,7 @@ router.post("/login", async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Server Error" });
+    res.status(500).json({ error: "Ошибка сервера" });
   }
 });
 
