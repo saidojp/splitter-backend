@@ -1,24 +1,28 @@
 import express from "express";
-import cors from "cors";
 import dotenv from "dotenv";
+import swaggerUi from "swagger-ui-express";
+import { swaggerSpec } from "./config/swagger.js";
 import authRoutes from "./routes/auth.js";
-import healthRoutes from "./routes/health.js";
-import { swaggerSpec, swaggerUiMiddleware } from "./config/swagger.js";
 
+// Загружаем .env
 dotenv.config();
 
 const app = express();
-app.use(cors());
 app.use(express.json());
 
-// Swagger docs
-app.use("/api-docs", ...swaggerUiMiddleware);
+// Swagger UI
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
-// Health check
-app.use("/health", healthRoutes);
-
+// Auth routes
 app.use("/auth", authRoutes);
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log(`Server running on http://localhost:${process.env.PORT || 3000}`);
+// Health check
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+// Запуск сервера
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });

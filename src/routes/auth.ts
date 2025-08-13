@@ -9,7 +9,45 @@ function generateUniqueId() {
   return "USER#" + Math.floor(1000 + Math.random() * 9000);
 }
 
-// Регистрация
+/**
+ * @swagger
+ * tags:
+ *   name: Auth
+ *   description: Авторизация и регистрация пользователей
+ */
+
+/**
+ * @swagger
+ * /auth/register:
+ *   post:
+ *     summary: Регистрация нового пользователя
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *               - username
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: user@example.com
+ *               password:
+ *                 type: string
+ *                 example: 123456
+ *               username:
+ *                 type: string
+ *                 example: John
+ *     responses:
+ *       200:
+ *         description: Успешная регистрация
+ *       400:
+ *         description: Ошибка валидации или email уже используется
+ */
 router.post("/register", async (req, res) => {
   try {
     const { email, password, username } = req.body;
@@ -51,7 +89,34 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// Логин
+/**
+ * @swagger
+ * /auth/login:
+ *   post:
+ *     summary: Авторизация пользователя
+ *     tags: [Auth]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: user@example.com
+ *               password:
+ *                 type: string
+ *                 example: 123456
+ *     responses:
+ *       200:
+ *         description: Успешный вход
+ *       400:
+ *         description: Неверный email или пароль
+ */
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
