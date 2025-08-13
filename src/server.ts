@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import authRoutes from "./routes/auth.js";
+import healthRoutes from "./routes/health.js";
 import { swaggerSpec, swaggerUiMiddleware } from "./config/swagger.js";
 
 dotenv.config();
@@ -14,9 +15,7 @@ app.use(express.json());
 app.use("/api-docs", ...swaggerUiMiddleware);
 
 // Health check
-app.get("/health", (_, res) => {
-  res.json({ status: "ok" });
-});
+app.use("/health", healthRoutes);
 
 app.use("/auth", authRoutes);
 
