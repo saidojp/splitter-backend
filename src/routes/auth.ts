@@ -158,18 +158,55 @@ router.post("/login", async (req, res) => {
  * /auth/me:
  *   get:
  *     summary: Получение информации о текущем пользователе
+ *     description: Возвращает профиль пользователя по ID из JWT токена.
  *     tags: [Auth]
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Информация о пользователе
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                   example: 1
+ *                 email:
+ *                   type: string
+ *                   example: user@example.com
+ *                 username:
+ *                   type: string
+ *                   example: John
+ *                 uniqueId:
+ *                   type: string
+ *                   example: USER#1234
+ *       401:
+ *         description: Требуется авторизация или неверный токен
+ *       404:
+ *         description: Пользователь не найден
  */
-router.get("/me", authenticateToken, (req: AuthRequest, res) => {
-  if (!req.user) {
-    return res.status(401).json({ error: "Не авторизован" });
+router.get("/me", authenticateToken, async (req: AuthRequest, res) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: "Не авторизован" });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: { id: true, email: true, username: true, uniqueId: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "Пользователь не найден" });
+    }
+
+    return res.json(user);
+  } catch (err) {
+    console.error("/auth/me error:", err);
+    return res.status(500).json({ error: "Ошибка сервера" });
   }
-  res.json({ user: req.user });
 });
 
 export default router;
