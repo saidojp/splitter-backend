@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./config/swagger.js";
 import authRoutes from "./routes/auth.js";
+import userRoutes from "./routes/user.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 
 // Загружаем .env
@@ -16,6 +17,7 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // Auth routes
 app.use("/auth", authRoutes);
+app.use("/user", userRoutes);
 
 // Health check
 app.get("/health", (req, res) => {
