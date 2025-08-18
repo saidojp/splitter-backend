@@ -2,6 +2,7 @@ import { Router } from "express";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { prisma } from "../config/prisma.js";
+import { authenticateToken, type AuthRequest } from "../middleware/auth.js";
 
 const router = Router();
 
@@ -45,8 +46,6 @@ function generateUniqueId() {
  *     responses:
  *       200:
  *         description: Успешная регистрация
- *       400:
- *         description: Ошибка валидации или email уже используется
  */
 router.post("/register", async (req, res) => {
   try {
@@ -114,8 +113,6 @@ router.post("/register", async (req, res) => {
  *     responses:
  *       200:
  *         description: Успешный вход
- *       400:
- *         description: Неверный email или пароль
  */
 router.post("/login", async (req, res) => {
   try {
@@ -154,6 +151,25 @@ router.post("/login", async (req, res) => {
     console.error(err);
     res.status(500).json({ error: "Ошибка сервера" });
   }
+});
+
+/**
+ * @swagger
+ * /auth/me:
+ *   get:
+ *     summary: Получение информации о текущем пользователе
+ *     tags: [Auth]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Информация о пользователе
+ */
+router.get("/me", authenticateToken, (req: AuthRequest, res) => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Не авторизован" });
+  }
+  res.json({ user: req.user });
 });
 
 export default router;

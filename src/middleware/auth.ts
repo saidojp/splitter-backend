@@ -1,11 +1,13 @@
 import type { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import dotenv from "dotenv";
 
-dotenv.config();
+export interface JwtPayload {
+  id: number;
+  email: string;
+}
 
 export interface AuthRequest extends Request {
-  user?: any;
+  user?: JwtPayload;
 }
 
 export function authenticateToken(
@@ -13,18 +15,31 @@ export function authenticateToken(
   res: Response,
   next: NextFunction
 ) {
-  const authHeader = req.headers["authorization"];
-  const token = authHeader && authHeader.split(" ")[1]; // Bearer TOKEN
-
-  if (!token) {
-    return res.status(401).json({ error: "Нет токена" });
-  }
-
-  jwt.verify(token, process.env.JWT_SECRET as string, (err, user) => {
-    if (err) {
-      return res.status(403).json({ error: "Неверный токен" });
+  try {
+    const authHeader = req.headers["authorization"];
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Требуется авторизация" });
     }
-    req.user = user;
+
+    const token = authHeader.split(" ")[1];
+    if (!token) {
+      return res.status(401).json({ error: "Неверный формат токена" });
+    }
+
+    const secret = process.env.JWT_SECRET;
+    if (!secret) {
+      throw new Error("JWT_SECRET не задан в .env");
+    }
+
+    const decoded = jwt.verify(
+      token,
+      secret as string
+    ) as unknown as JwtPayload;
+    req.user = decoded;
+
     next();
-  });
+  } catch (err) {
+    console.error("JWT verify error:", err);
+    return res.status(401).json({ error: "Неверный или просроченный токен" });
+  }
 }
