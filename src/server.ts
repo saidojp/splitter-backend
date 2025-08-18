@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import swaggerUi from "swagger-ui-express";
 import { swaggerSpec } from "./config/swagger.js";
 import authRoutes from "./routes/auth.js";
+import { errorHandler } from "./middleware/errorHandler.js";
 
 // Загружаем .env
 dotenv.config();
@@ -20,6 +21,9 @@ app.use("/auth", authRoutes);
 app.get("/health", (req, res) => {
   res.json({ status: "ok" });
 });
+
+// Global error handler (must be after routes)
+app.use(errorHandler);
 
 // Запуск сервера
 const PORT = process.env.PORT || 3001;
