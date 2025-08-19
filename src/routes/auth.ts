@@ -23,6 +23,7 @@ function generateUniqueId() {
  *   post:
  *     summary: Регистрация нового пользователя
  *     tags: [Auth]
+ *     security: []
  *     requestBody:
  *       required: true
  *       content:
@@ -44,33 +45,126 @@ function generateUniqueId() {
  *                 type: string
  *                 example: John
  *           example:
- *             email: user@example.com
- *             password: 123456
- *             username: John
+ *             email: "user@example.com"
+ *             password: "123456"
+ *             username: "John"
  *     responses:
  *       200:
  *         description: Успешная регистрация
+ *       400:
+ *         description: Неверные данные запроса
+ *       409:
+ *         description: Email уже используется
+ *       415:
+ *         description: Неверный Content-Type (нужен application/json)
  */
 router.post("/register", async (req, res) => {
+  const ct = String(req.headers["content-type"] || "");
+  console.log("/auth/register content-type:", ct);
   console.log("/auth/register body:", req.body);
   try {
-    const { email, password, username } = req.body;
-
-    if (!email || !password || !username) {
-      return res.status(400).json({ error: "Заполните все поля" });
+    if (!ct.includes("application/json")) {
+      return res
+        .status(415)
+        .json({ error: "Content-Type должен быть application/json" });
     }
 
-    const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser) {
-      return res.status(400).json({ error: "Email уже используется" });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const uniqueId = generateUniqueId();
-
-    const user = await prisma.user.create({
-      data: { email, password: hashedPassword, username, uniqueId },
+    const { email, password, username } = req.body ?? {};
+    console.log("/auth/register types:", {
+      email: typeof email,
+      password: typeof password,
+      username: typeof username,
     });
+
+    // Мягкая коррекция типов: числа → строки, массивы/объекты запрещаем
+    const emailVal =
+      typeof email === "string"
+        ? email
+        : typeof email === "number"
+        ? String(email)
+        : email;
+    const passwordVal =
+      typeof password === "string"
+        ? password
+        : typeof password === "number"
+        ? String(password)
+        : password;
+    const usernameVal =
+      typeof username === "string"
+        ? username
+        : typeof username === "number"
+        ? String(username)
+        : username;
+
+    if (
+      typeof emailVal !== "string" ||
+      typeof passwordVal !== "string" ||
+      typeof usernameVal !== "string"
+    ) {
+      return res.status(400).json({
+        error:
+          "Неверные типы полей: ожидаются строки для email, password, username",
+      });
+    }
+
+    const cleanEmail = emailVal.trim().toLowerCase();
+    const cleanUsername = usernameVal.trim();
+    const cleanPassword = passwordVal;
+
+    if (!cleanEmail || !cleanPassword || !cleanUsername) {
+      return res
+        .status(400)
+        .json({ error: "Заполните все поля: email, password, username" });
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      return res.status(400).json({ error: "Неверный формат email" });
+    }
+    if (cleanPassword.length < 6) {
+      return res
+        .status(400)
+        .json({ error: "Пароль должен быть не менее 6 символов" });
+    }
+
+    const existingUser = await prisma.user.findUnique({
+      where: { email: cleanEmail },
+    });
+    if (existingUser) {
+      return res.status(409).json({ error: "Email уже используется" });
+    }
+
+    const hashedPassword = await bcrypt.hash(cleanPassword, 10);
+
+    // Генерируем uniqueId с несколькими попытками на случай коллизии
+    let uniqueId = "";
+    for (let i = 0; i < 5; i++) {
+      uniqueId = generateUniqueId();
+      const exists = await prisma.user.findUnique({ where: { uniqueId } });
+      if (!exists) break;
+      if (i === 4) {
+        return res
+          .status(500)
+          .json({ error: "Не удалось сгенерировать уникальный ID" });
+      }
+    }
+
+    let user;
+    try {
+      user = await prisma.user.create({
+        data: {
+          email: cleanEmail,
+          password: hashedPassword,
+          username: cleanUsername,
+          uniqueId,
+        },
+      });
+    } catch (e: any) {
+      if (e?.code === "P2002") {
+        // конфликт уникальности
+        return res.status(409).json({ error: "Email уже используется" });
+      }
+      throw e;
+    }
 
     const token = jwt.sign(
       { id: user.id, email: user.email },
@@ -99,6 +193,7 @@ router.post("/register", async (req, res) => {
  *   post:
  *     summary: Авторизация пользователя
  *     tags: [Auth]
+ *     security: []
  *     requestBody:
  *       required: true
  *       content:
@@ -116,27 +211,49 @@ router.post("/register", async (req, res) => {
  *                 type: string
  *                 example: 123456
  *           example:
- *             email: user@example.com
- *             password: 123456
+ *             email: "user@example.com"
+ *             password: "123456"
  *     responses:
  *       200:
  *         description: Успешный вход
+ *       400:
+ *         description: Неверные учетные данные
+ *       415:
+ *         description: Неверный Content-Type (нужен application/json)
  */
 router.post("/login", async (req, res) => {
   console.log("/auth/login body:", req.body);
   try {
-    const { email, password } = req.body;
+    const { email, password } = req.body ?? {};
 
-    if (!email || !password) {
+    const emailVal =
+      typeof email === "string"
+        ? email
+        : typeof email === "number"
+        ? String(email)
+        : email;
+    const passwordVal =
+      typeof password === "string"
+        ? password
+        : typeof password === "number"
+        ? String(password)
+        : password;
+
+    if (typeof emailVal !== "string" || typeof passwordVal !== "string") {
+      return res.status(400).json({ error: "Неверные типы полей" });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail || !password) {
       return res.status(400).json({ error: "Заполните все поля" });
     }
 
-    const user = await prisma.user.findUnique({ where: { email } });
+    const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
     if (!user) {
       return res.status(400).json({ error: "Неверный email или пароль" });
     }
 
-    const isValid = await bcrypt.compare(password, user.password);
+    const isValid = await bcrypt.compare(passwordVal, user.password);
     if (!isValid) {
       return res.status(400).json({ error: "Неверный email или пароль" });
     }

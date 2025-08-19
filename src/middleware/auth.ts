@@ -47,15 +47,22 @@ export function authenticateToken(
       | (LibJwtPayload & { id?: unknown; email?: unknown }) =
       typeof verified === "string" ? ({} as any) : (verified as any);
 
-    if (
-      !payload ||
-      typeof payload.id !== "number" ||
-      typeof payload.email !== "string"
-    ) {
+    if (!payload || typeof payload.email !== "string") {
       return res.status(401).json({ error: "Неверный токен" });
     }
 
-    const userPayload: JwtPayload = { id: payload.id, email: payload.email };
+    // Некоторые клиенты могут сериализовать id как строку — пробуем привести
+    const idValue =
+      typeof payload.id === "number"
+        ? payload.id
+        : typeof payload.id === "string" && /^\d+$/.test(payload.id)
+        ? Number(payload.id)
+        : NaN;
+    if (!Number.isFinite(idValue)) {
+      return res.status(401).json({ error: "Неверный токен (id)" });
+    }
+
+    const userPayload: JwtPayload = { id: idValue, email: payload.email };
     if (typeof payload.iat === "number") userPayload.iat = payload.iat;
     if (typeof payload.exp === "number") userPayload.exp = payload.exp;
     req.user = userPayload;
