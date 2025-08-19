@@ -43,11 +43,16 @@ function generateUniqueId() {
  *               username:
  *                 type: string
  *                 example: John
+ *           example:
+ *             email: user@example.com
+ *             password: 123456
+ *             username: John
  *     responses:
  *       200:
  *         description: Успешная регистрация
  */
 router.post("/register", async (req, res) => {
+  console.log("/auth/register body:", req.body);
   try {
     const { email, password, username } = req.body;
 
@@ -110,11 +115,15 @@ router.post("/register", async (req, res) => {
  *               password:
  *                 type: string
  *                 example: 123456
+ *           example:
+ *             email: user@example.com
+ *             password: 123456
  *     responses:
  *       200:
  *         description: Успешный вход
  */
 router.post("/login", async (req, res) => {
+  console.log("/auth/login body:", req.body);
   try {
     const { email, password } = req.body;
 
