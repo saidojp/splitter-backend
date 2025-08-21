@@ -35,6 +35,7 @@ Variables:
 - PORT: HTTP port (defaults to 3001 in code if not set)
 - JWT_SECRET: secret for signing JWTs
 - DATABASE_URL: Prisma connection string
+- CORS_ORIGINS: список разрешенных источников через запятую, например "http://localhost:5173,http://localhost:3000"
 
 3. Prisma
 
