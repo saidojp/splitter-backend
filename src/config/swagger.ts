@@ -16,6 +16,44 @@ const options = {
           bearerFormat: "JWT",
         },
       },
+      schemas: {
+        Friendship: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            requesterId: { type: "integer" },
+            receiverId: { type: "integer" },
+            status: {
+              type: "string",
+              enum: ["PENDING", "ACCEPTED", "REJECTED", "BLOCKED"],
+            },
+            createdAt: { type: "string" },
+            updatedAt: { type: "string" },
+          },
+        },
+        Group: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            name: { type: "string" },
+            ownerId: { type: "integer" },
+            createdAt: { type: "string" },
+          },
+        },
+        Session: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            creatorId: { type: "integer" },
+            groupId: { type: "integer", nullable: true },
+            receiptImageUrl: { type: "string", nullable: true },
+            serviceFee: { type: "number" },
+            total: { type: "number" },
+            status: { type: "string", enum: ["ACTIVE", "CLOSED", "CANCELED"] },
+            createdAt: { type: "string" },
+          },
+        },
+      },
     },
     security: [
       {

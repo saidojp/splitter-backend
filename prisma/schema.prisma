@@ -20,4 +20,119 @@ model User {
   username  String
   uniqueId  String   @unique
   createdAt DateTime @default(now())
+
+  // Friendships
+  sentFriendships     Friendship[] @relation("UserFriendshipRequester")
+  receivedFriendships Friendship[] @relation("UserFriendshipReceiver")
+
+  // Groups
+  ownedGroups     Group[]       @relation("GroupOwner")
+  groupMemberships GroupMember[]
+
+  // Sessions
+  sessionsCreated     Session[]            @relation("SessionCreator")
+  sessionParticipates SessionParticipant[]
+
+  // Assignments
+  itemAssignments ItemAssignment[]
+}
+
+enum FriendshipStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  BLOCKED
+}
+
+model Friendship {
+  id          Int               @id @default(autoincrement())
+  requesterId Int
+  receiverId  Int
+  requester   User              @relation("UserFriendshipRequester", fields: [requesterId], references: [id])
+  receiver    User              @relation("UserFriendshipReceiver", fields: [receiverId], references: [id])
+  status      FriendshipStatus  @default(PENDING)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@unique([requesterId, receiverId])
+}
+
+model Group {
+  id        Int       @id @default(autoincrement())
+  name      String
+  ownerId   Int
+  owner     User      @relation("GroupOwner", fields: [ownerId], references: [id])
+  members   GroupMember[]
+  sessions  Session[]
+  createdAt DateTime  @default(now())
+}
+
+enum GroupRole {
+  MEMBER
+  ADMIN
+}
+
+model GroupMember {
+  groupId  Int
+  userId   Int
+  role     GroupRole @default(MEMBER)
+  joinedAt DateTime  @default(now())
+
+  group Group @relation(fields: [groupId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+
+  @@id([groupId, userId])
+}
+
+enum SessionStatus {
+  ACTIVE
+  CLOSED
+  CANCELED
+}
+
+model Session {
+  id             Int             @id @default(autoincrement())
+  creatorId      Int
+  groupId        Int?
+  receiptImageUrl String?
+  serviceFee     Decimal         @default(0)
+  total          Decimal         @default(0)
+  status         SessionStatus   @default(ACTIVE)
+  createdAt      DateTime        @default(now())
+
+  creator   User    @relation("SessionCreator", fields: [creatorId], references: [id])
+  group     Group?  @relation(fields: [groupId], references: [id])
+  participants SessionParticipant[]
+  items        ReceiptItem[]
+}
+
+model SessionParticipant {
+  sessionId Int
+  userId    Int
+  amountOwed Decimal @default(0)
+
+  session Session @relation(fields: [sessionId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@id([sessionId, userId])
+}
+
+model ReceiptItem {
+  id        Int     @id @default(autoincrement())
+  sessionId Int
+  name      String
+  price     Decimal
+
+  session     Session         @relation(fields: [sessionId], references: [id])
+  assignments ItemAssignment[]
+}
+
+model ItemAssignment {
+  itemId Int
+  userId Int
+
+  item ReceiptItem @relation(fields: [itemId], references: [id])
+  user User        @relation(fields: [userId], references: [id])
+
+  @@id([itemId, userId])
 }
