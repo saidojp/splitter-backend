@@ -15,36 +15,35 @@ const app = express();
 app.use(express.json());
 
 // Настройка CORS с долгим кэшированием preflight и поддержкой нескольких origin
+const allowlist = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
 const corsSettings: cors.CorsOptions = {
-  origin: "*", // Разрешаем все источники
+  // ВАЖНО: при credentials: true нельзя отправлять Access-Control-Allow-Origin: "*".
+  // Используем функцию, которая отражает origin запроса, чтобы корректно работать с credentials.
+  origin: (
+    origin: string | undefined,
+    callback: (err: Error | null, allow?: boolean) => void
+  ) => {
+    // Разрешаем запросы без origin (например, Postman, curl)
+    if (!origin) return callback(null, true);
+
+    // В non-production разрешаем все источники (отражая origin)
+    if (process.env.NODE_ENV !== "production") return callback(null, true);
+
+    // В production – только те, что в allowlist
+    if (allowlist.includes(origin)) return callback(null, true);
+
+    console.warn(`CORS blocked request from: ${origin}`);
+    return callback(new Error("Not allowed by CORS"));
+  },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   credentials: true,
   maxAge: 86400, // 24 часа кэширования preflight (OPTIONS)
 };
-
-// Если задан CORS_ORIGINS и это не "*", то устанавливаем более строгие правила
-if (process.env.CORS_ORIGINS && process.env.CORS_ORIGINS !== "*") {
-  const corsOrigins = process.env.CORS_ORIGINS.split(",").map((origin) =>
-    origin.trim()
-  );
-
-  corsSettings.origin = (
-    origin: string | undefined,
-    callback: (err: Error | null, allow?: boolean) => void
-  ) => {
-    // Разрешаем запросы без origin (например, от Postman)
-    if (!origin) return callback(null, true);
-
-    // Проверяем разрешенные origins или пропускаем всё в development
-    if (corsOrigins.includes(origin) || process.env.NODE_ENV !== "production") {
-      callback(null, true);
-    } else {
-      console.warn(`CORS blocked request from: ${origin}`);
-      callback(new Error("Not allowed by CORS"));
-    }
-  };
-}
 
 app.use(cors(corsSettings));
 

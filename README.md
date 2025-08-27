@@ -89,4 +89,4 @@ If type defs are missing, add a lightweight declaration file or use default impo
 
 ## License
 
-ISC
+MIT

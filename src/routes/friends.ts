@@ -36,6 +36,7 @@ router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) return res.status(401).json({ error: "Не авторизован" });
     const userId = req.user.id;
+    console.log("GET /friends for:", userId);
 
     const [asRequester, asReceiver] = await Promise.all([
       prisma.friendship.findMany({
@@ -52,6 +53,7 @@ router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
       ...asRequester.map((f) => f.receiver),
       ...asReceiver.map((f) => f.requester),
     ];
+    console.log("GET /friends count:", friends.length);
     return res.json(friends);
   } catch (err) {
     console.error("/friends error:", err);
@@ -91,6 +93,10 @@ router.get(
           orderBy: { createdAt: "desc" },
         }),
       ]);
+      console.log("GET /friends/requests counts:", {
+        incoming: incoming.length,
+        outgoing: outgoing.length,
+      });
 
       return res.json({
         incoming: incoming.map((r) => ({ id: r.id, from: r.requester })),
@@ -117,7 +123,7 @@ router.get(
  *         schema:
  *           type: string
  *         required: true
- *         description: uniqueId пользователя (например, USER#1234)
+ *         description: uniqueId пользователя (например, #1234)
  *     responses:
  *       200:
  *         description: Результат поиска
@@ -128,6 +134,7 @@ router.get(
   async (req: AuthRequest, res: Response) => {
     try {
       const q = String(req.query.q || "").trim();
+      console.log("GET /friends/search q:", q);
       if (!q) return res.json([]);
       const user = await prisma.user.findUnique({
         where: { uniqueId: q },
@@ -159,7 +166,7 @@ router.get(
  *             properties:
  *               uniqueId:
  *                 type: string
- *                 example: USER#1234
+ *                 example: #1234
  *     responses:
  *       200:
  *         description: Запрос отправлен или подтвержден
@@ -172,6 +179,7 @@ router.post(
       if (!req.user) return res.status(401).json({ error: "Не авторизован" });
       const me = req.user.id;
       const { uniqueId } = req.body ?? {};
+      console.log("POST /friends/request body:", { uniqueId });
       if (typeof uniqueId !== "string" || !uniqueId.trim()) {
         return res.status(400).json({ error: "uniqueId обязателен" });
       }
@@ -196,6 +204,7 @@ router.post(
           where: { id: reciprocal.id },
           data: { status: "ACCEPTED" },
         });
+        console.log("/friends/request auto-accepted:", { id: accepted.id });
         return res.json({ success: true, action: "accepted", id: accepted.id });
       }
 
@@ -220,6 +229,7 @@ router.post(
       const created = await prisma.friendship.create({
         data: { requesterId: me, receiverId: target.id },
       });
+      console.log("/friends/request created:", { id: created.id });
       return res.json({ success: true, action: "requested", id: created.id });
     } catch (err) {
       console.error("/friends/request error:", err);
@@ -262,6 +272,7 @@ router.patch(
       if (!req.user) return res.status(401).json({ error: "Не авторизован" });
       const me = req.user.id;
       const { uniqueId, requesterId } = req.body ?? {};
+      console.log("PATCH /friends/accept body:", { uniqueId, requesterId });
 
       let otherId: number | null = null;
       if (typeof requesterId === "number") {
@@ -290,6 +301,7 @@ router.patch(
         where: { id: fr.id },
         data: { status: "ACCEPTED" },
       });
+      console.log("/friends/accept updated:", { id: updated.id });
       return res.json({ success: true, id: updated.id });
     } catch (err) {
       console.error("/friends/accept error:", err);
@@ -332,6 +344,7 @@ router.patch(
       if (!req.user) return res.status(401).json({ error: "Не авторизован" });
       const me = req.user.id;
       const { uniqueId, requesterId } = req.body ?? {};
+      console.log("PATCH /friends/reject body:", { uniqueId, requesterId });
 
       let otherId: number | null = null;
       if (typeof requesterId === "number") {
@@ -360,6 +373,7 @@ router.patch(
         where: { id: fr.id },
         data: { status: "REJECTED" },
       });
+      console.log("/friends/reject updated:", { id: updated.id });
       return res.json({ success: true, id: updated.id });
     } catch (err) {
       console.error("/friends/reject error:", err);
@@ -370,7 +384,7 @@ router.patch(
 
 /**
  * @swagger
- * /friends/{userId}:
+ * /friends/{uniqueId}:
  *   delete:
  *     summary: Удалить из друзей (или отменить/очистить запросы)
  *     tags: [Friends]
@@ -378,30 +392,38 @@ router.patch(
  *       - bearerAuth: []
  *     parameters:
  *       - in: path
- *         name: userId
+ *         name: uniqueId
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
  *     responses:
  *       200:
  *         description: Связь удалена (если была)
  */
 router.delete(
-  "/:userId",
+  "/:uniqueId",
   authenticateToken,
   async (req: AuthRequest, res: Response) => {
     try {
       if (!req.user) return res.status(401).json({ error: "Не авторизован" });
       const me = req.user.id;
-      const otherId = Number(req.params.userId);
-      if (!Number.isFinite(otherId))
-        return res.status(400).json({ error: "Некорректный userId" });
+      const uniqueId = String(req.params.uniqueId || "").trim();
+      if (!uniqueId)
+        return res.status(400).json({ error: "Некорректный uniqueId" });
+
+      console.log("DELETE /friends by uniqueId:", { me, uniqueId });
+
+      const other = await prisma.user.findUnique({
+        where: { uniqueId },
+        select: { id: true },
+      });
+      if (!other) return res.json({ success: true, removed: false });
 
       const fr = await prisma.friendship.findFirst({
         where: {
           OR: [
-            { requesterId: me, receiverId: otherId },
-            { requesterId: otherId, receiverId: me },
+            { requesterId: me, receiverId: other.id },
+            { requesterId: other.id, receiverId: me },
           ],
         },
       });
@@ -409,9 +431,10 @@ router.delete(
       if (!fr) return res.json({ success: true, removed: false });
 
       await prisma.friendship.delete({ where: { id: fr.id } });
+      console.log("DELETE /friends removed:", { linkId: fr.id });
       return res.json({ success: true, removed: true });
     } catch (err) {
-      console.error("DELETE /friends/:userId error:", err);
+      console.error("DELETE /friends/:uniqueId error:", err);
       return res.status(500).json({ error: "Ошибка сервера" });
     }
   }

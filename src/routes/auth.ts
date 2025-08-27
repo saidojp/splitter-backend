@@ -7,7 +7,8 @@ import { authenticateToken, type AuthRequest } from "../middleware/auth.js";
 const router = Router();
 
 function generateUniqueId() {
-  return "USER#" + Math.floor(1000 + Math.random() * 9000);
+  // Format: #1234 (4-digit code). Removed 'USER' prefix per requirement.
+  return "#" + Math.floor(1000 + Math.random() * 9000);
 }
 
 /**
@@ -147,6 +148,7 @@ router.post("/register", async (req, res) => {
           .json({ error: "Не удалось сгенерировать уникальный ID" });
       }
     }
+    console.log("/auth/register generated uniqueId:", uniqueId);
 
     let user;
     try {
@@ -224,6 +226,13 @@ router.post("/register", async (req, res) => {
 router.post("/login", async (req, res) => {
   console.log("/auth/login body:", req.body);
   try {
+    const ct = String(req.headers["content-type"] || "");
+    if (!ct.includes("application/json")) {
+      return res
+        .status(415)
+        .json({ error: "Content-Type должен быть application/json" });
+    }
+
     const { email, password } = req.body ?? {};
 
     const emailVal =
@@ -243,8 +252,9 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Неверные типы полей" });
     }
 
-    const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail || !password) {
+    const cleanEmail = emailVal.trim().toLowerCase();
+    const cleanPassword = passwordVal;
+    if (!cleanEmail || !cleanPassword) {
       return res.status(400).json({ error: "Заполните все поля" });
     }
 
@@ -253,7 +263,7 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Неверный email или пароль" });
     }
 
-    const isValid = await bcrypt.compare(passwordVal, user.password);
+    const isValid = await bcrypt.compare(cleanPassword, user.password);
     if (!isValid) {
       return res.status(400).json({ error: "Неверный email или пароль" });
     }
@@ -307,7 +317,7 @@ router.post("/login", async (req, res) => {
  *                   example: John
  *                 uniqueId:
  *                   type: string
- *                   example: USER#1234
+ *                   example: #1234
  *       401:
  *         description: Требуется авторизация или неверный токен
  *       404:
