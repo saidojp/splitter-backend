@@ -15,37 +15,56 @@ const app = express();
 app.use(express.json());
 
 // Configure CORS with long preflight caching and multiple origins support
-const allowlist = (process.env.CORS_ORIGINS || "")
+const rawCorsOrigins = (process.env.CORS_ORIGINS || "").trim();
+const allowAllCors =
+  rawCorsOrigins === "*" || process.env.ALLOW_ALL_CORS === "1";
+const allowlist = rawCorsOrigins
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
 
-const corsSettings: cors.CorsOptions = {
-  // IMPORTANT: with credentials: true we cannot send Access-Control-Allow-Origin: "*".
-  // Use a function that reflects the request origin to work correctly with credentials.
-  origin: (
-    origin: string | undefined,
-    callback: (err: Error | null, allow?: boolean) => void
-  ) => {
-    // Allow requests without origin (e.g., Postman, curl)
-    if (!origin) return callback(null, true);
+if (allowAllCors) {
+  // Temporary relaxed policy: allow all origins. Note: credentials must be false with '*'.
+  app.use(
+    cors({
+      origin: "*",
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+      credentials: false,
+      maxAge: 86400,
+    })
+  );
+  console.warn(
+    "CORS is in permissive mode: allowing all origins (*) without credentials"
+  );
+} else {
+  const corsSettings: cors.CorsOptions = {
+    // IMPORTANT: with credentials: true we cannot send Access-Control-Allow-Origin: "*".
+    // Use a function that reflects the request origin to work correctly with credentials.
+    origin: (
+      origin: string | undefined,
+      callback: (err: Error | null, allow?: boolean) => void
+    ) => {
+      // Allow requests without origin (e.g., Postman, curl)
+      if (!origin) return callback(null, true);
 
-    // In non-production allow all origins (reflecting origin)
-    if (process.env.NODE_ENV !== "production") return callback(null, true);
+      // In non-production allow all origins (reflecting origin)
+      if (process.env.NODE_ENV !== "production") return callback(null, true);
 
-    // In production – only those in the allowlist
-    if (allowlist.includes(origin)) return callback(null, true);
+      // In production – only those in the allowlist
+      if (allowlist.includes(origin)) return callback(null, true);
 
-    console.warn(`CORS blocked request from: ${origin}`);
-    return callback(new Error("Not allowed by CORS"));
-  },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-  credentials: true,
-  maxAge: 86400, // 24h preflight caching (OPTIONS)
-};
+      console.warn(`CORS blocked request from: ${origin}`);
+      return callback(new Error("Not allowed by CORS"));
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    credentials: true,
+    maxAge: 86400, // 24h preflight caching (OPTIONS)
+  };
 
-app.use(cors(corsSettings));
+  app.use(cors(corsSettings));
+}
 
 // Swagger UI
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -69,7 +88,11 @@ app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(
     "CORS allowlist:",
-    allowlist.length ? allowlist : "(none / dev mode)"
+    allowAllCors
+      ? "* (permissive)"
+      : allowlist.length
+      ? allowlist
+      : "(none / dev mode)"
   );
 });
 
