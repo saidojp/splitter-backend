@@ -188,6 +188,8 @@ router.post(
     try {
       if (!req.user) return res.status(401).json({ error: "Unauthorized" });
       const me = req.user.id;
+      // Correctly parse unique ID as a string to avoid JSON errors.
+      // Body is parsed by express.json() in server.ts, we strictly require a string here.
       const { uniqueId } = req.body ?? {};
       console.log("POST /friends/request body:", { uniqueId });
       if (typeof uniqueId !== "string" || !uniqueId.trim()) {
@@ -280,6 +282,8 @@ router.patch(
     try {
       if (!req.user) return res.status(401).json({ error: "Unauthorized" });
       const me = req.user.id;
+      // Correctly parse unique ID as a string to avoid JSON errors.
+      // Body is parsed by express.json() in server.ts, we strictly require a string here.
       const { uniqueId, requesterId } = req.body ?? {};
       console.log("PATCH /friends/accept body:", { uniqueId, requesterId });
 
@@ -352,6 +356,8 @@ router.patch(
     try {
       if (!req.user) return res.status(401).json({ error: "Unauthorized" });
       const me = req.user.id;
+      // Correctly parse unique ID as a string to avoid JSON errors.
+      // Body is parsed by express.json() in server.ts, we strictly require a string here.
       const { uniqueId, requesterId } = req.body ?? {};
       console.log("PATCH /friends/reject body:", { uniqueId, requesterId });
 
