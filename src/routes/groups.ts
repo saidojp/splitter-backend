@@ -106,6 +106,55 @@ router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
 
 /**
  * @swagger
+ * /groups/lookup:
+ *   get:
+ *     summary: Find a group's ID by name (current user's groups)
+ *     tags: [Groups]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: name
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: Group name to lookup (case-insensitive)
+ *     responses:
+ *       200:
+ *         description: Group found
+ *       404:
+ *         description: Group not found
+ */
+router.get(
+  "/lookup",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const name = String(req.query.name || "").trim();
+      if (!name) return res.status(400).json({ error: "name is required" });
+
+      const me = req.user.id;
+      const group = await prisma.group.findFirst({
+        where: {
+          name: { equals: name, mode: "insensitive" },
+          OR: [{ ownerId: me }, { members: { some: { userId: me } } }],
+        },
+        select: { id: true, name: true },
+        orderBy: { id: "asc" },
+      });
+
+      if (!group) return res.status(404).json({ error: "Group not found" });
+      return res.json(group);
+    } catch (err) {
+      console.error("GET /groups/lookup error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
  * /groups/{groupId}:
  *   patch:
  *     summary: Rename group (owner only)
