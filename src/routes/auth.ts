@@ -67,7 +67,7 @@ router.post("/register", async (req, res) => {
     if (!ct.includes("application/json")) {
       return res
         .status(415)
-        .json({ error: "Content-Type должен быть application/json" });
+        .json({ error: "Content-Type must be application/json" });
     }
 
     const { email, password, username } = req.body ?? {};
@@ -77,7 +77,7 @@ router.post("/register", async (req, res) => {
       username: typeof username,
     });
 
-    // Мягкая коррекция типов: числа → строки, массивы/объекты запрещаем
+    // Soft type coercion: numbers → strings, arrays/objects are not allowed
     const emailVal =
       typeof email === "string"
         ? email
@@ -104,7 +104,7 @@ router.post("/register", async (req, res) => {
     ) {
       return res.status(400).json({
         error:
-          "Неверные типы полей: ожидаются строки для email, password, username",
+          "Invalid field types: expected strings for email, password, username",
       });
     }
 
@@ -115,37 +115,35 @@ router.post("/register", async (req, res) => {
     if (!cleanEmail || !cleanPassword || !cleanUsername) {
       return res
         .status(400)
-        .json({ error: "Заполните все поля: email, password, username" });
+        .json({ error: "Please provide email, password, and username" });
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(cleanEmail)) {
-      return res.status(400).json({ error: "Неверный формат email" });
+      return res.status(400).json({ error: "Invalid email format" });
     }
     if (cleanPassword.length < 6) {
       return res
         .status(400)
-        .json({ error: "Пароль должен быть не менее 6 символов" });
+        .json({ error: "Password must be at least 6 characters" });
     }
 
     const existingUser = await prisma.user.findUnique({
       where: { email: cleanEmail },
     });
     if (existingUser) {
-      return res.status(409).json({ error: "Email уже используется" });
+      return res.status(409).json({ error: "Email already in use" });
     }
 
     const hashedPassword = await bcrypt.hash(cleanPassword, 10);
 
-    // Генерируем uniqueId с несколькими попытками на случай коллизии
+    // Generate uniqueId with multiple attempts to avoid collisions
     let uniqueId = "";
     for (let i = 0; i < 5; i++) {
       uniqueId = generateUniqueId();
       const exists = await prisma.user.findUnique({ where: { uniqueId } });
       if (!exists) break;
       if (i === 4) {
-        return res
-          .status(500)
-          .json({ error: "Не удалось сгенерировать уникальный ID" });
+        return res.status(500).json({ error: "Failed to generate unique ID" });
       }
     }
     console.log("/auth/register generated uniqueId:", uniqueId);
@@ -162,8 +160,8 @@ router.post("/register", async (req, res) => {
       });
     } catch (e: any) {
       if (e?.code === "P2002") {
-        // конфликт уникальности
-        return res.status(409).json({ error: "Email уже используется" });
+        // unique constraint conflict
+        return res.status(409).json({ error: "Email already in use" });
       }
       throw e;
     }
@@ -174,6 +172,7 @@ router.post("/register", async (req, res) => {
       { expiresIn: "7d" }
     );
 
+    console.log("/auth/register success:", { id: user.id });
     res.json({
       token,
       user: {
@@ -185,7 +184,7 @@ router.post("/register", async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Ошибка сервера" });
+    res.status(500).json({ error: "Server error" });
   }
 });
 
@@ -230,7 +229,7 @@ router.post("/login", async (req, res) => {
     if (!ct.includes("application/json")) {
       return res
         .status(415)
-        .json({ error: "Content-Type должен быть application/json" });
+        .json({ error: "Content-Type must be application/json" });
     }
 
     const { email, password } = req.body ?? {};
@@ -249,23 +248,23 @@ router.post("/login", async (req, res) => {
         : password;
 
     if (typeof emailVal !== "string" || typeof passwordVal !== "string") {
-      return res.status(400).json({ error: "Неверные типы полей" });
+      return res.status(400).json({ error: "Invalid field types" });
     }
 
     const cleanEmail = emailVal.trim().toLowerCase();
     const cleanPassword = passwordVal;
     if (!cleanEmail || !cleanPassword) {
-      return res.status(400).json({ error: "Заполните все поля" });
+      return res.status(400).json({ error: "Please fill all fields" });
     }
 
     const user = await prisma.user.findUnique({ where: { email: cleanEmail } });
     if (!user) {
-      return res.status(400).json({ error: "Неверный email или пароль" });
+      return res.status(400).json({ error: "Invalid email or password" });
     }
 
     const isValid = await bcrypt.compare(cleanPassword, user.password);
     if (!isValid) {
-      return res.status(400).json({ error: "Неверный email или пароль" });
+      return res.status(400).json({ error: "Invalid email or password" });
     }
 
     const token = jwt.sign(
@@ -274,6 +273,7 @@ router.post("/login", async (req, res) => {
       { expiresIn: "7d" }
     );
 
+    console.log("/auth/login success:", { id: user.id });
     res.json({
       token,
       user: {
@@ -285,7 +285,7 @@ router.post("/login", async (req, res) => {
     });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Ошибка сервера" });
+    res.status(500).json({ error: "Server error" });
   }
 });
 
@@ -326,7 +326,7 @@ router.post("/login", async (req, res) => {
 router.get("/me", authenticateToken, async (req: AuthRequest, res) => {
   try {
     if (!req.user) {
-      return res.status(401).json({ error: "Не авторизован" });
+      return res.status(401).json({ error: "Unauthorized" });
     }
 
     const user = await prisma.user.findUnique({
@@ -335,13 +335,13 @@ router.get("/me", authenticateToken, async (req: AuthRequest, res) => {
     });
 
     if (!user) {
-      return res.status(404).json({ error: "Пользователь не найден" });
+      return res.status(404).json({ error: "User not found" });
     }
 
     return res.json(user);
   } catch (err) {
     console.error("/auth/me error:", err);
-    return res.status(500).json({ error: "Ошибка сервера" });
+    return res.status(500).json({ error: "Server error" });
   }
 });
 

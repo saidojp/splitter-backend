@@ -37,17 +37,17 @@ export function authenticateToken(
       process.env.DEBUG_AUTH === "1";
     const raw = req.headers["authorization"];
     if (typeof raw !== "string") {
-      return res.status(401).json({ error: "Требуется авторизация" });
+      return res.status(401).json({ error: "Authorization required" });
     }
 
     const [scheme, token] = raw.split(" ");
     if (!token || (scheme ?? "").toLowerCase() !== "bearer") {
-      return res.status(401).json({ error: "Неверный формат токена" });
+      return res.status(401).json({ error: "Invalid token format" });
     }
 
     const secret = process.env.JWT_SECRET;
     if (!secret) {
-      throw new Error("JWT_SECRET не задан в .env");
+      throw new Error("JWT_SECRET is not set in .env");
     }
 
     const verified = jwt.verify(token, secret as string);
@@ -57,7 +57,7 @@ export function authenticateToken(
       typeof verified === "string" ? ({} as any) : (verified as any);
 
     if (!payload || typeof payload.email !== "string") {
-      return res.status(401).json({ error: "Неверный токен" });
+      return res.status(401).json({ error: "Invalid token" });
     }
 
     // Некоторые клиенты могут сериализовать id как строку — пробуем привести
@@ -68,7 +68,7 @@ export function authenticateToken(
         ? Number(payload.id)
         : NaN;
     if (!Number.isFinite(idValue)) {
-      return res.status(401).json({ error: "Неверный токен (id)" });
+      return res.status(401).json({ error: "Invalid token (id)" });
     }
 
     const userPayload: JwtPayload = { id: idValue, email: payload.email };
@@ -115,14 +115,14 @@ export function authenticateToken(
     }
 
     if (err instanceof TokenExpiredError) {
-      return res.status(401).json({ error: "Срок действия токена истек" });
+      return res.status(401).json({ error: "Token expired" });
     }
     if (err instanceof NotBeforeError) {
-      return res.status(401).json({ error: "Токен еще не активен (nbf)" });
+      return res.status(401).json({ error: "Token not active yet (nbf)" });
     }
     if (err instanceof JsonWebTokenError) {
-      return res.status(401).json({ error: "Неверный токен" });
+      return res.status(401).json({ error: "Invalid token" });
     }
-    return res.status(401).json({ error: "Неверный или просроченный токен" });
+    return res.status(401).json({ error: "Invalid or expired token" });
   }
 }

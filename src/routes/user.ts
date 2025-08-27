@@ -10,14 +10,14 @@ const router = Router();
  * @swagger
  * tags:
  *   name: User
- *   description: Управление пользователем
+ *   description: User management
  */
 
 /**
  * @swagger
  * /user/update:
  *   patch:
- *     summary: Обновить профиль пользователя (username или password)
+ *     summary: Update user profile (username or password)
  *     tags: [User]
  *     security:
  *       - bearerAuth: []
@@ -36,13 +36,13 @@ const router = Router();
  *                 example: newStrongPassword123
  *     responses:
  *       200:
- *         description: Данные пользователя обновлены
+ *         description: User data updated
  *       400:
- *         description: Не переданы поля для обновления
+ *         description: No fields to update
  *       401:
- *         description: Требуется авторизация
+ *         description: Unauthorized
  *       404:
- *         description: Пользователь не найден
+ *         description: User not found
  */
 router.patch(
   "/update",
@@ -50,14 +50,12 @@ router.patch(
   async (req: AuthRequest, res: Response) => {
     try {
       if (!req.user) {
-        return res.status(401).json({ error: "Не авторизован" });
+        return res.status(401).json({ error: "Unauthorized" });
       }
 
       const { username, password } = req.body ?? {};
       if (!username && !password) {
-        return res
-          .status(400)
-          .json({ error: "Нужно передать username или password" });
+        return res.status(400).json({ error: "Provide username or password" });
       }
 
       const data: Record<string, unknown> = {};
@@ -69,7 +67,7 @@ router.patch(
       }
 
       if (Object.keys(data).length === 0) {
-        return res.status(400).json({ error: "Неверные значения полей" });
+        return res.status(400).json({ error: "Invalid field values" });
       }
 
       const updated = await prisma.user
@@ -84,13 +82,13 @@ router.patch(
         });
 
       if (!updated) {
-        return res.status(404).json({ error: "Пользователь не найден" });
+        return res.status(404).json({ error: "User not found" });
       }
-
+      console.log("/user/update success:", { id: updated.id });
       return res.json(updated);
     } catch (err) {
       console.error("/user/update error:", err);
-      return res.status(500).json({ error: "Ошибка сервера" });
+      return res.status(500).json({ error: "Server error" });
     }
   }
 );
@@ -99,17 +97,17 @@ router.patch(
  * @swagger
  * /user/delete:
  *   delete:
- *     summary: Удалить аккаунт пользователя
+ *     summary: Delete user account
  *     tags: [User]
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Аккаунт удален
+ *         description: Account deleted
  *       401:
- *         description: Требуется авторизация
+ *         description: Unauthorized
  *       404:
- *         description: Пользователь не найден
+ *         description: User not found
  */
 router.delete(
   "/delete",
@@ -117,7 +115,7 @@ router.delete(
   async (req: AuthRequest, res: Response) => {
     try {
       if (!req.user) {
-        return res.status(401).json({ error: "Не авторизован" });
+        return res.status(401).json({ error: "Unauthorized" });
       }
 
       const deleted = await prisma.user
@@ -131,13 +129,13 @@ router.delete(
         });
 
       if (!deleted) {
-        return res.status(404).json({ error: "Пользователь не найден" });
+        return res.status(404).json({ error: "User not found" });
       }
-
+      console.log("/user/delete success:", { id: req.user.id });
       return res.json({ success: true });
     } catch (err) {
       console.error("/user/delete error:", err);
-      return res.status(500).json({ error: "Ошибка сервера" });
+      return res.status(500).json({ error: "Server error" });
     }
   }
 );
@@ -146,7 +144,7 @@ router.delete(
  * @swagger
  * /user/list:
  *   get:
- *     summary: Список пользователей (временно)
+ *     summary: List users (temporary)
  *     tags: [User]
  *     security:
  *       - bearerAuth: []
@@ -163,10 +161,11 @@ router.get(
         select: { id: true, email: true, username: true, uniqueId: true },
         orderBy: { id: "asc" },
       });
+      console.log("/user/list count:", users.length);
       return res.json(users);
     } catch (err) {
       console.error("/user/list error:", err);
-      return res.status(500).json({ error: "Ошибка сервера" });
+      return res.status(500).json({ error: "Server error" });
     }
   }
 );

@@ -8,32 +8,32 @@ import userRoutes from "./routes/user.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import friendsRoutes from "./routes/friends.js";
 
-// Загружаем .env
+// Load .env
 dotenv.config();
 
 const app = express();
 app.use(express.json());
 
-// Настройка CORS с долгим кэшированием preflight и поддержкой нескольких origin
+// Configure CORS with long preflight caching and multiple origins support
 const allowlist = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map((o) => o.trim())
   .filter(Boolean);
 
 const corsSettings: cors.CorsOptions = {
-  // ВАЖНО: при credentials: true нельзя отправлять Access-Control-Allow-Origin: "*".
-  // Используем функцию, которая отражает origin запроса, чтобы корректно работать с credentials.
+  // IMPORTANT: with credentials: true we cannot send Access-Control-Allow-Origin: "*".
+  // Use a function that reflects the request origin to work correctly with credentials.
   origin: (
     origin: string | undefined,
     callback: (err: Error | null, allow?: boolean) => void
   ) => {
-    // Разрешаем запросы без origin (например, Postman, curl)
+    // Allow requests without origin (e.g., Postman, curl)
     if (!origin) return callback(null, true);
 
-    // В non-production разрешаем все источники (отражая origin)
+    // In non-production allow all origins (reflecting origin)
     if (process.env.NODE_ENV !== "production") return callback(null, true);
 
-    // В production – только те, что в allowlist
+    // In production – only those in the allowlist
     if (allowlist.includes(origin)) return callback(null, true);
 
     console.warn(`CORS blocked request from: ${origin}`);
@@ -42,7 +42,7 @@ const corsSettings: cors.CorsOptions = {
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
   credentials: true,
-  maxAge: 86400, // 24 часа кэширования preflight (OPTIONS)
+  maxAge: 86400, // 24h preflight caching (OPTIONS)
 };
 
 app.use(cors(corsSettings));
@@ -63,10 +63,14 @@ app.get("/health", (req, res) => {
 // Global error handler (must be after routes)
 app.use(errorHandler);
 
-// Запуск сервера
+// Start server
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  console.log(
+    "CORS allowlist:",
+    allowlist.length ? allowlist : "(none / dev mode)"
+  );
 });
 
 console.log("DEBUG ENV:", {

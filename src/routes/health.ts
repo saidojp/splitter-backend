@@ -7,10 +7,10 @@ const router = Router();
  * /health:
  *   get:
  *     summary: Health check
- *     description: サーバーを確認するためのエンドポイント
+ *     description: Endpoint to check server health
  *     responses:
  *       200:
- *         description: サーバーは正常に動作しています
+ *         description: Server is operating normally
  *         content:
  *           application/json:
  *             schema:
