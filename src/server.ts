@@ -7,6 +7,8 @@ import authRoutes from "./routes/auth.js";
 import userRoutes from "./routes/user.js";
 import { errorHandler } from "./middleware/errorHandler.js";
 import friendsRoutes from "./routes/friends.js";
+import groupsRoutes from "./routes/groups.js";
+import sessionsRoutes from "./routes/sessions.js";
 
 // Load .env
 dotenv.config();
@@ -73,6 +75,8 @@ app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use("/auth", authRoutes);
 app.use("/user", userRoutes);
 app.use("/friends", friendsRoutes);
+app.use("/groups", groupsRoutes);
+app.use("/sessions", sessionsRoutes);
 
 // Health check
 app.get("/health", (req, res) => {
