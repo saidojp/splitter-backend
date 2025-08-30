@@ -255,7 +255,7 @@ router.delete(
  * @swagger
  * /groups/{groupId}/members:
  *   post:
- *     summary: Add member by uniqueId (owner only)
+ *     summary: Add member by uniqueId (owner only; only friends can be added)
  *     tags: [Groups]
  *     security:
  *       - bearerAuth: []
@@ -303,6 +303,27 @@ router.post(
         select: { id: true },
       });
       if (!user) return res.status(404).json({ error: "User not found" });
+      // Allow adding only friends (ACCEPTED friendship between requester and target)
+      const friendship = await prisma.friendship.findFirst({
+        where: {
+          status: "ACCEPTED",
+          OR: [
+            { requesterId: req.user.id, receiverId: user.id },
+            { requesterId: user.id, receiverId: req.user.id },
+          ],
+        },
+        select: { id: true },
+      });
+      if (!friendship) {
+        console.warn("/groups add member denied (not friends):", {
+          groupId,
+          requesterId: req.user.id,
+          targetUserId: user.id,
+        });
+        return res
+          .status(403)
+          .json({ error: "You can only add users who are your friends" });
+      }
       if (user.id === req.user.id) {
         // owner already added below but avoid duplicate error for adding self
         const exists = await prisma.groupMember.findUnique({
