@@ -53,13 +53,6 @@ router.post("/", authenticateToken, async (req: AuthRequest, res: Response) => {
       data: { name, ownerId: req.user.id },
     });
 
-    // Add owner as ADMIN member
-    await prisma.groupMember
-      .create({
-        data: { groupId: group.id, userId: req.user.id, role: "ADMIN" },
-      })
-      .catch(() => {});
-
     console.log("/groups create:", { id: group.id, ownerId: req.user.id });
     return res.json(group);
   } catch (err) {
@@ -398,3 +391,179 @@ router.delete(
 );
 
 export default router;
+/**
+ * @swagger
+ * /groups/{groupId}:
+ *   get:
+ *     summary: Get group details with members and current user's role
+ *     tags: [Groups]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: groupId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Group details
+ */
+router.get(
+  "/:groupId",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const groupId = Number(req.params.groupId);
+      if (!Number.isFinite(groupId))
+        return res.status(400).json({ error: "Invalid groupId" });
+
+      const group = await prisma.group.findUnique({
+        where: { id: groupId },
+        select: {
+          id: true,
+          name: true,
+          ownerId: true,
+          createdAt: true,
+          members: {
+            orderBy: { joinedAt: "asc" },
+            select: {
+              userId: true,
+              role: true,
+              joinedAt: true,
+              user: { select: { id: true, username: true, uniqueId: true } },
+            },
+          },
+        },
+      });
+      if (!group) return res.status(404).json({ error: "Group not found" });
+
+      const me = req.user.id;
+      const myMember = group.members.find((m) => m.userId === me) || null;
+      const isOwner = group.ownerId === me;
+      // Access: only owner or member
+      if (!isOwner && !myMember)
+        return res.status(403).json({ error: "Forbidden" });
+
+      const members = group.members.map((m) => ({
+        id: m.user.id,
+        username: m.user.username,
+        uniqueId: m.user.uniqueId,
+        role: "member" as const, // roles strictly owner/member; members list shows non-owner participants
+        joinedAt: m.joinedAt,
+      }));
+
+      const currentUserRole = isOwner
+        ? ("owner" as const)
+        : myMember
+        ? ("member" as const)
+        : null;
+      const isAdmin = isOwner; // keep flag for frontend compatibility
+
+      return res.json({
+        id: group.id,
+        name: group.name,
+        ownerId: group.ownerId,
+        createdAt: group.createdAt,
+        currentUserRole,
+        isAdmin,
+        members,
+      });
+    } catch (err) {
+      console.error("GET /groups/:groupId error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /groups/{groupId}/members/{uniqueId}/promote:
+ *   patch:
+ *     summary: Transfer ownership to a member (owner only)
+ *     tags: [Groups]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: groupId
+ *         schema:
+ *           type: integer
+ *         required: true
+ *       - in: path
+ *         name: uniqueId
+ *         schema:
+ *           type: string
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Ownership transferred
+ */
+router.patch(
+  "/:groupId/members/:uniqueId/promote",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const groupId = Number(req.params.groupId);
+      const uniqueId = String(req.params.uniqueId || "").trim();
+      if (!Number.isFinite(groupId))
+        return res.status(400).json({ error: "Invalid groupId" });
+      if (!uniqueId) return res.status(400).json({ error: "Invalid uniqueId" });
+
+      const group = await prisma.group.findUnique({
+        where: { id: groupId },
+        select: { ownerId: true },
+      });
+      if (!group) return res.status(404).json({ error: "Group not found" });
+
+      // Only current owner can transfer ownership
+      if (group.ownerId !== req.user.id)
+        return res.status(403).json({ error: "Forbidden" });
+
+      const target = await prisma.user.findUnique({
+        where: { uniqueId },
+        select: { id: true },
+      });
+      if (!target) return res.status(404).json({ error: "User not found" });
+      if (target.id === group.ownerId)
+        return res.json({ success: true, transferred: false });
+
+      const member = await prisma.groupMember.findUnique({
+        where: { groupId_userId: { groupId, userId: target.id } },
+        select: { userId: true },
+      });
+      if (!member)
+        return res.status(404).json({ error: "User is not a group member" });
+
+      const previousOwnerId = group.ownerId;
+
+      // Transfer ownership
+      await prisma.group.update({
+        where: { id: groupId },
+        data: { ownerId: target.id },
+      });
+
+      // Ensure previous owner stays as a member
+      await prisma.groupMember.upsert({
+        where: { groupId_userId: { groupId, userId: previousOwnerId } },
+        update: {},
+        create: { groupId, userId: previousOwnerId, role: "MEMBER" },
+      });
+
+      console.log("/groups transfer ownership:", {
+        groupId,
+        from: previousOwnerId,
+        to: target.id,
+      });
+      return res.json({ success: true, transferred: true });
+    } catch (err) {
+      console.error(
+        "PATCH /groups/:groupId/members/:uniqueId/promote error:",
+        err
+      );
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
