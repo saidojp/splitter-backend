@@ -99,6 +99,87 @@ router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
 
 /**
  * @swagger
+ * /groups/{groupId}:
+ *   get:
+ *     summary: Get group participants (owner included as member with role=owner)
+ *     tags: [Groups]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: groupId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Group participants
+ */
+router.get(
+  "/:groupId",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const groupId = Number(req.params.groupId);
+      if (!Number.isFinite(groupId))
+        return res.status(400).json({ error: "Invalid groupId" });
+
+      const group = await prisma.group.findUnique({
+        where: { id: groupId },
+        select: {
+          id: true,
+          name: true,
+          ownerId: true,
+          owner: { select: { id: true, username: true, uniqueId: true } },
+          members: {
+            orderBy: { joinedAt: "asc" },
+            select: {
+              userId: true,
+              joinedAt: true,
+              user: { select: { id: true, username: true, uniqueId: true } },
+            },
+          },
+        },
+      });
+      if (!group) return res.status(404).json({ error: "Group not found" });
+
+      const me = req.user.id;
+      const isOwner = group.ownerId === me;
+      const myMember = group.members.find((m) => m.userId === me) || null;
+      if (!isOwner && !myMember)
+        return res.status(403).json({ error: "Forbidden" });
+
+      // Build members: owner first with role=owner, then all group members (excluding owner) with role=member
+      const ownerEntry = {
+        uniqueId: group.owner.uniqueId,
+        username: group.owner.username,
+        role: "owner" as const,
+      };
+      const memberEntries = group.members
+        .filter((m) => m.userId !== group.ownerId)
+        .map((m) => ({
+          uniqueId: m.user.uniqueId,
+          username: m.user.username,
+          role: "member" as const,
+        }));
+
+      const role = isOwner ? ("owner" as const) : ("member" as const);
+
+      return res.json({
+        group: { id: group.id, name: group.name },
+        role,
+        members: [ownerEntry, ...memberEntries],
+      });
+    } catch (err) {
+      console.error("GET /groups/:groupId error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
  * /groups/lookup:
  *   get:
  *     summary: Find a group's ID by name (current user's groups)
@@ -390,93 +471,6 @@ router.delete(
   }
 );
 
-export default router;
-/**
- * @swagger
- * /groups/{groupId}:
- *   get:
- *     summary: Get group details with members and current user's role
- *     tags: [Groups]
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: groupId
- *         required: true
- *         schema:
- *           type: integer
- *     responses:
- *       200:
- *         description: Group details
- */
-router.get(
-  "/:groupId",
-  authenticateToken,
-  async (req: AuthRequest, res: Response) => {
-    try {
-      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
-      const groupId = Number(req.params.groupId);
-      if (!Number.isFinite(groupId))
-        return res.status(400).json({ error: "Invalid groupId" });
-
-      const group = await prisma.group.findUnique({
-        where: { id: groupId },
-        select: {
-          id: true,
-          name: true,
-          ownerId: true,
-          createdAt: true,
-          members: {
-            orderBy: { joinedAt: "asc" },
-            select: {
-              userId: true,
-              role: true,
-              joinedAt: true,
-              user: { select: { id: true, username: true, uniqueId: true } },
-            },
-          },
-        },
-      });
-      if (!group) return res.status(404).json({ error: "Group not found" });
-
-      const me = req.user.id;
-      const myMember = group.members.find((m) => m.userId === me) || null;
-      const isOwner = group.ownerId === me;
-      // Access: only owner or member
-      if (!isOwner && !myMember)
-        return res.status(403).json({ error: "Forbidden" });
-
-      const members = group.members.map((m) => ({
-        id: m.user.id,
-        username: m.user.username,
-        uniqueId: m.user.uniqueId,
-        role: "member" as const, // roles strictly owner/member; members list shows non-owner participants
-        joinedAt: m.joinedAt,
-      }));
-
-      const currentUserRole = isOwner
-        ? ("owner" as const)
-        : myMember
-        ? ("member" as const)
-        : null;
-      const isAdmin = isOwner; // keep flag for frontend compatibility
-
-      return res.json({
-        id: group.id,
-        name: group.name,
-        ownerId: group.ownerId,
-        createdAt: group.createdAt,
-        currentUserRole,
-        isAdmin,
-        members,
-      });
-    } catch (err) {
-      console.error("GET /groups/:groupId error:", err);
-      return res.status(500).json({ error: "Server error" });
-    }
-  }
-);
-
 /**
  * @swagger
  * /groups/{groupId}/members/{uniqueId}/promote:
@@ -567,3 +561,5 @@ router.patch(
     }
   }
 );
+
+export default router;
