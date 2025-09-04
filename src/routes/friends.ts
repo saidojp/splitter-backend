@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { Response } from "express";
 import { prisma } from "../config/prisma.js";
+import jwt from "jsonwebtoken";
 import { authenticateToken, type AuthRequest } from "../middleware/auth.js";
 
 const router = Router();
@@ -19,6 +20,159 @@ const userPublicSelect = {
   username: true,
   uniqueId: true,
 } as const;
+
+/** Helper: choose secret for friend invites */
+function getFriendInviteSecret() {
+  return process.env.FRIEND_INVITE_SECRET || process.env.JWT_SECRET || "";
+}
+
+/**
+ * @swagger
+ * /friends/invite:
+ *   post:
+ *     summary: Create a short-lived friend invite token (auth required)
+ *     tags: [Friends]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               expiresInSeconds:
+ *                 type: integer
+ *                 description: TTL in seconds (default 900 = 15 minutes)
+ *     responses:
+ *       200:
+ *         description: Invite created
+ */
+router.post(
+  "/invite",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const secret = getFriendInviteSecret();
+      if (!secret)
+        return res.status(500).json({ error: "Invite secret missing" });
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      const ttl = Math.max(
+        60,
+        Math.min(3600, Number(req.body?.expiresInSeconds) || 900)
+      );
+      const exp = nowSec + ttl;
+      const payload = {
+        typ: "friend_invite" as const,
+        inviterId: req.user.id,
+        iat: nowSec,
+        exp,
+      };
+      const token = jwt.sign(payload, secret);
+
+      const baseUrl =
+        process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
+      const url = `${baseUrl}/friends/join?token=${encodeURIComponent(token)}`;
+      console.log("/friends invite created:", { inviterId: req.user.id, exp });
+      return res.json({
+        token,
+        url,
+        expiresAt: new Date(exp * 1000).toISOString(),
+      });
+    } catch (err) {
+      console.error("POST /friends/invite error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /friends/join:
+ *   post:
+ *     summary: Accept friend invite via token (auth required)
+ *     tags: [Friends]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token]
+ *             properties:
+ *               token:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Friendship created/accepted or already exists
+ */
+router.post(
+  "/join",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const token =
+        typeof req.body?.token === "string" ? req.body.token.trim() : "";
+      if (!token) return res.status(400).json({ error: "token is required" });
+
+      const secret = getFriendInviteSecret();
+      if (!secret)
+        return res.status(500).json({ error: "Invite secret missing" });
+
+      let decoded: any;
+      try {
+        decoded = jwt.verify(token, secret);
+      } catch (e) {
+        console.warn("/friends join invalid token:", e);
+        return res.status(400).json({ error: "Invalid or expired token" });
+      }
+
+      if (!decoded || decoded.typ !== "friend_invite" || !decoded.inviterId)
+        return res.status(400).json({ error: "Invalid token payload" });
+
+      const inviterId = Number(decoded.inviterId);
+      const me = req.user.id;
+      if (!Number.isFinite(inviterId))
+        return res.status(400).json({ error: "Invalid token claims" });
+      if (inviterId === me) return res.json({ success: true, action: "self" });
+
+      const existing = await prisma.friendship.findFirst({
+        where: {
+          OR: [
+            { requesterId: inviterId, receiverId: me },
+            { requesterId: me, receiverId: inviterId },
+          ],
+        },
+      });
+
+      if (existing) {
+        if (existing.status === "ACCEPTED") {
+          return res.json({ success: true, action: "existing" });
+        }
+        const updated = await prisma.friendship.update({
+          where: { id: existing.id },
+          data: { status: "ACCEPTED" },
+        });
+        console.log("/friends join accepted:", { id: updated.id });
+        return res.json({ success: true, action: "accepted" });
+      }
+
+      const created = await prisma.friendship.create({
+        data: { requesterId: inviterId, receiverId: me, status: "ACCEPTED" },
+      });
+      console.log("/friends join created:", { id: created.id });
+      return res.json({ success: true, action: "created" });
+    } catch (err) {
+      console.error("POST /friends/join error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
 
 /**
  * @swagger
