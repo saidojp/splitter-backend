@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { Response } from "express";
 import { prisma } from "../config/prisma.js";
+import jwt from "jsonwebtoken";
 import { authenticateToken, type AuthRequest } from "../middleware/auth.js";
 
 const router = Router();
@@ -222,6 +223,233 @@ router.get(
       return res.json(group);
     } catch (err) {
       console.error("GET /groups/lookup error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/** Helper: choose secret for group invites */
+function getInviteSecret() {
+  return process.env.GROUP_INVITE_SECRET || process.env.JWT_SECRET || "";
+}
+
+/**
+ * @swagger
+ * /groups/{groupId}/invite:
+ *   post:
+ *     summary: Create a short-lived invite token for joining a group (owner only)
+ *     tags: [Groups]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: groupId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               expiresInSeconds:
+ *                 type: integer
+ *                 description: TTL in seconds (default 900 = 15 minutes)
+ *     responses:
+ *       200:
+ *         description: Invite created
+ */
+router.post(
+  "/:groupId/invite",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const groupId = Number(req.params.groupId);
+      if (!Number.isFinite(groupId))
+        return res.status(400).json({ error: "Invalid groupId" });
+
+      const group = await prisma.group.findUnique({
+        where: { id: groupId },
+        select: { ownerId: true, name: true },
+      });
+      if (!group) return res.status(404).json({ error: "Group not found" });
+      if (group.ownerId !== req.user.id)
+        return res.status(403).json({ error: "Forbidden" });
+
+      const secret = getInviteSecret();
+      if (!secret)
+        return res.status(500).json({ error: "Invite secret missing" });
+
+      const nowSec = Math.floor(Date.now() / 1000);
+      const ttl = Math.max(
+        60,
+        Math.min(3600, Number(req.body?.expiresInSeconds) || 900)
+      );
+      const exp = nowSec + ttl;
+      const payload = {
+        typ: "group_invite" as const,
+        gid: groupId,
+        oid: group.ownerId,
+        iat: nowSec,
+        exp,
+      };
+      const token = jwt.sign(payload, secret);
+
+      const baseUrl =
+        process.env.PUBLIC_BASE_URL || `${req.protocol}://${req.get("host")}`;
+      const url = `${baseUrl}/groups/join?token=${encodeURIComponent(token)}`;
+
+      console.log("/groups invite created:", {
+        groupId,
+        ownerId: group.ownerId,
+        exp,
+      });
+      return res.json({
+        token,
+        url,
+        expiresAt: new Date(exp * 1000).toISOString(),
+      });
+    } catch (err) {
+      console.error("POST /groups/:groupId/invite error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /groups/join:
+ *   post:
+ *     summary: Join a group via invite token (auth required); auto-friend with owner
+ *     tags: [Groups]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token]
+ *             properties:
+ *               token:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Joined or already a member
+ */
+router.post(
+  "/join",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const token =
+        typeof req.body?.token === "string" ? req.body.token.trim() : "";
+      if (!token) return res.status(400).json({ error: "token is required" });
+
+      const secret = getInviteSecret();
+      if (!secret)
+        return res.status(500).json({ error: "Invite secret missing" });
+
+      let decoded: any;
+      try {
+        decoded = jwt.verify(token, secret);
+      } catch (e) {
+        console.warn("/groups join invalid token:", e);
+        return res.status(400).json({ error: "Invalid or expired token" });
+      }
+
+      if (
+        !decoded ||
+        decoded.typ !== "group_invite" ||
+        !decoded.gid ||
+        !decoded.oid
+      )
+        return res.status(400).json({ error: "Invalid token payload" });
+
+      const groupId = Number(decoded.gid);
+      const ownerId = Number(decoded.oid);
+      if (!Number.isFinite(groupId) || !Number.isFinite(ownerId))
+        return res.status(400).json({ error: "Invalid token claims" });
+
+      const group = await prisma.group.findUnique({
+        where: { id: groupId },
+        select: { ownerId: true },
+      });
+      if (!group) return res.status(404).json({ error: "Group not found" });
+      // Invalidate token if ownership changed
+      if (group.ownerId !== ownerId)
+        return res
+          .status(400)
+          .json({ error: "Invite no longer valid (owner changed)" });
+
+      const userId = req.user.id;
+      if (userId === ownerId) {
+        return res.json({ joined: false, member: "owner" });
+      }
+
+      // Ensure friendship (ACCEPTED)
+      let friendshipStatus: "existing" | "accepted" | "created" = "existing";
+      const existing = await prisma.friendship.findFirst({
+        where: {
+          OR: [
+            { requesterId: ownerId, receiverId: userId },
+            { requesterId: userId, receiverId: ownerId },
+          ],
+        },
+      });
+      if (existing) {
+        if (existing.status !== "ACCEPTED") {
+          await prisma.friendship.update({
+            where: { id: existing.id },
+            data: { status: "ACCEPTED" },
+          });
+          friendshipStatus = "accepted";
+        }
+      } else {
+        await prisma.friendship.create({
+          data: {
+            requesterId: ownerId,
+            receiverId: userId,
+            status: "ACCEPTED",
+          },
+        });
+        friendshipStatus = "created";
+      }
+
+      // Ensure membership
+      const member = await prisma.groupMember.findUnique({
+        where: { groupId_userId: { groupId, userId } },
+      });
+      let memberStatus: "existing" | "created" | "owner" = "existing";
+      if (member) {
+        memberStatus = "existing";
+      } else if (group.ownerId === userId) {
+        memberStatus = "owner";
+      } else {
+        await prisma.groupMember.create({
+          data: { groupId, userId, role: "MEMBER" },
+        });
+        memberStatus = "created";
+      }
+
+      console.log("/groups join:", {
+        groupId,
+        userId,
+        friendshipStatus,
+        memberStatus,
+      });
+      return res.json({
+        joined: memberStatus !== "owner",
+        friendship: friendshipStatus,
+        member: memberStatus,
+      });
+    } catch (err) {
+      console.error("POST /groups/join error:", err);
       return res.status(500).json({ error: "Server error" });
     }
   }
