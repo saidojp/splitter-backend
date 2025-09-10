@@ -9,6 +9,7 @@ import { errorHandler } from "./middleware/errorHandler.js";
 import friendsRoutes from "./routes/friends.js";
 import groupsRoutes from "./routes/groups.js";
 import sessionsRoutes from "./routes/sessions.js";
+import usersRoutes from "./routes/users.js";
 
 // Load .env
 dotenv.config();
@@ -77,6 +78,7 @@ app.use("/user", userRoutes);
 app.use("/friends", friendsRoutes);
 app.use("/groups", groupsRoutes);
 app.use("/sessions", sessionsRoutes);
+app.use("/users", usersRoutes);
 
 // Health check
 app.get("/health", (req, res) => {

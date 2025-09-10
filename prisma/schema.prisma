@@ -19,6 +19,7 @@ model User {
   password  String
   username  String
   uniqueId  String   @unique
+  avatarUrl String?
   createdAt DateTime @default(now())
 
   // Friendships
