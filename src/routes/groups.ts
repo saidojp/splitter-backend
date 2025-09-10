@@ -701,6 +701,70 @@ router.delete(
 
 /**
  * @swagger
+ * /groups/{groupId}/leave:
+ *   post:
+ *     summary: Leave group (non-owners only)
+ *     tags: [Groups]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: groupId
+ *         schema:
+ *           type: integer
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Left group
+ *       400:
+ *         description: Owner cannot leave
+ *       404:
+ *         description: Group not found
+ */
+router.post(
+  "/:groupId/leave",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const groupId = Number(req.params.groupId);
+      if (!Number.isFinite(groupId))
+        return res.status(400).json({ error: "Invalid groupId" });
+
+      const group = await prisma.group.findUnique({
+        where: { id: groupId },
+        select: { ownerId: true },
+      });
+      if (!group) return res.status(404).json({ error: "Group not found" });
+
+      const me = req.user.id;
+      if (group.ownerId === me)
+        return res.status(400).json({
+          error: "Owner cannot leave; transfer ownership first",
+        });
+
+      const member = await prisma.groupMember.findUnique({
+        where: { groupId_userId: { groupId, userId: me } },
+      });
+      if (!member)
+        return res.json({ success: true, message: "Already not a member" });
+
+      await prisma.groupMember.delete({
+        where: { groupId_userId: { groupId, userId: me } },
+      });
+
+      // Consistent logging with kick flow
+      console.log("/groups leave member:", { groupId, userId: me });
+      return res.json({ success: true, message: "Left group" });
+    } catch (err) {
+      console.error("POST /groups/:groupId/leave error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
  * /groups/{groupId}/members/{uniqueId}/promote:
  *   patch:
  *     summary: Transfer ownership to a member (owner only)
