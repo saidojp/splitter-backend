@@ -1,14 +1,14 @@
 # Receipt Splitter Backend
 
-TypeScript + ESM Express API with Prisma, JWT auth, and Swagger docs.
+TypeScript + ESM Express API with Prisma (PostgreSQL), JWT auth, and Swagger docs.
 
 ## Features
 
-- ESM everywhere (package.json "type": "module", TS "module": "NodeNext")
+- ESM everywhere (`package.json` `type: module`, TS `module: NodeNext`)
 - Express 5, CORS, dotenv
 - Prisma ORM (PostgreSQL)
-- JWT auth middleware
-- Swagger UI at /api-docs
+- JWT auth middleware + request logging for `/auth/*`
+- Swagger UI at `/api-docs`
 
 ## Requirements
 
@@ -17,27 +17,32 @@ TypeScript + ESM Express API with Prisma, JWT auth, and Swagger docs.
 
 ## Setup
 
-1. Install deps
+1) Install deps
 
 ```bash
 npm install
 ```
 
-2. Configure environment
+Note: `postinstall` runs `prisma generate`.
+
+2) Configure environment
 
 ```bash
 cp .env.example .env
 # edit .env with your values
 ```
 
-Variables:
+Env variables (minimum):
 
-- PORT: HTTP port (defaults to 3001 in code if not set)
-- JWT_SECRET: secret for signing JWTs
-- DATABASE_URL: Prisma connection string
-- CORS_ORIGINS: список разрешенных источников через запятую, например "http://localhost:5173,http://localhost:3000"
+- `DATABASE_URL` — Prisma connection string
+- `JWT_SECRET` — secret for signing JWTs
+- `PORT` — HTTP port (defaults to `3001`)
+- `CORS_ORIGINS` — comma-separated allowlist for production (e.g. `http://localhost:5173,http://localhost:3000`)
+- `ALLOW_ALL_CORS=1` — permissive mode (`Access-Control-Allow-Origin: *`, credentials disabled)
+- `DEBUG_AUTH=1` — verbose JWT verification logs
+- `DEFAULT_AVATAR_URL` — fallback avatar URL (optional)
 
-3. Prisma
+3) Prisma (first time or after schema changes)
 
 ```bash
 npx prisma generate
@@ -46,27 +51,42 @@ npx prisma migrate dev --name init
 
 ## Run
 
-Two common ways:
-
-- Dev (ts-node):
+- Dev (ts-node loader via script):
 
 ```bash
-npm i -D ts-node
+npm start
+```
+
+- Alternative dev:
+
+```bash
 npx ts-node --esm src/server.ts
 ```
 
-- Build then run:
+Swagger UI: `GET /api-docs`
 
-```bash
-npx tsc -p tsconfig.json
-node dist/server.js
-```
+Health check: `GET /health` → `{ "status": "ok" }`
 
-Endpoints:
+Auth routes mounted at `/auth` (`/auth/register`, `/auth/login`, `/auth/me`).
 
-- GET /health → { status: "ok" }
-- Swagger UI → GET /api-docs
-- Auth routes mounted at /auth
+## Architecture quickly
+
+- Entry: `src/server.ts` wires JSON, CORS, Swagger, routes: `/auth`, `/user`, `/friends`, `/groups`, `/sessions`, `/users`, plus global `errorHandler`.
+- Data: `src/config/prisma.ts` exports a singleton `prisma` (`@prisma/client`).
+- Schema: `prisma/schema.prisma` includes models `User`, `Friendship`, `Group`, `Session`, `ReceiptItem`, `ItemAssignment` and enums (`FriendshipStatus`, `GroupRole`, `SessionStatus`).
+- Auth: `src/middleware/auth.ts` verifies Bearer JWT and sets `req.user = { id, email }`; enable extra logs with `DEBUG_AUTH=1`.
+- Logging: `src/middleware/logAuth.ts` logs masked bodies for `/auth/*`.
+- Swagger: config in `src/config/swagger.ts`; scans JSDoc on `src/routes/*.ts`.
+
+## Conventions and patterns
+
+- NodeNext ESM: include `.js` in import specifiers from TS (e.g., `import { errorHandler } from "./middleware/errorHandler.js"`).
+- `tsconfig` uses `verbatimModuleSyntax:true`; prefer `import type` for types. Add `@types/node` if you need Node globals.
+- Auth endpoints require `Content-Type: application/json` and validate/coerce basic types.
+- Protected routes use `authenticateToken`; access user via `req.user.id` only after the middleware.
+- Always avoid returning `password`. Use Prisma `select` on reads (see `routes/auth.ts`, `routes/user.ts`).
+- Handle Prisma errors: `P2002` (unique constraint), `P2025` (record not found).
+- CORS: `ALLOW_ALL_CORS=1` → `origin: "*"` (no credentials). Otherwise, non-production reflects any origin; production restricts to `CORS_ORIGINS` allowlist.
 
 ## Useful Prisma commands
 
@@ -76,16 +96,18 @@ npx prisma db push       # Sync schema without migration
 npx prisma migrate dev   # Create/apply migrations in dev
 ```
 
-## Notes
+## Folder overview
 
-- Using verbatimModuleSyntax: import types with `import type { ... } from "module"`.
-- If you see module/type errors for swagger-jsdoc, install it:
+- `src/server.ts` — app bootstrap and route mounting
+- `src/config/*` — Prisma client, Swagger, app utilities
+- `src/middleware/*` — `authenticateToken`, `errorHandler`, `logAuth`
+- `src/routes/*` — route modules with Swagger JSDoc
+- `prisma/schema.prisma` — data model
 
-```bash
-npm i swagger-jsdoc
-```
+## Notes / pitfalls
 
-If type defs are missing, add a lightweight declaration file or use default import.
+- Missing `.js` in import paths will break at runtime under NodeNext.
+- Missing `JWT_SECRET` or `DATABASE_URL` will prevent startup/auth.
 
 ## License
 
