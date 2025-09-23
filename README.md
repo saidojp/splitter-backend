@@ -17,7 +17,7 @@ TypeScript + ESM Express API with Prisma (PostgreSQL), JWT auth, and Swagger doc
 
 ## Setup
 
-1) Install deps
+1. Install deps
 
 ```bash
 npm install
@@ -25,7 +25,7 @@ npm install
 
 Note: `postinstall` runs `prisma generate`.
 
-2) Configure environment
+2. Configure environment
 
 ```bash
 cp .env.example .env
@@ -42,7 +42,7 @@ Env variables (minimum):
 - `DEBUG_AUTH=1` — verbose JWT verification logs
 - `DEFAULT_AVATAR_URL` — fallback avatar URL (optional)
 
-3) Prisma (first time or after schema changes)
+3. Prisma (first time or after schema changes)
 
 ```bash
 npx prisma generate
@@ -68,6 +68,31 @@ Swagger UI: `GET /api-docs`
 Health check: `GET /health` → `{ "status": "ok" }`
 
 Auth routes mounted at `/auth` (`/auth/register`, `/auth/login`, `/auth/me`).
+
+### Docker
+
+Build image:
+
+```bash
+docker build -t splitter-backend:latest .
+```
+
+Run container (map port and pass envs):
+
+```bash
+docker run --rm -p 3001:3001 \
+	-e PORT=3001 \
+	-e JWT_SECRET=devsecret \
+	-e DATABASE_URL=postgresql://user:pass@host:5432/db \
+	-e ALLOW_ALL_CORS=1 \
+	--name splitter-backend splitter-backend:latest
+```
+
+Notes:
+
+- Container listens on `3001` (see `EXPOSE 3001` in Dockerfile).
+- Prisma client is generated at build time; ensure `DATABASE_URL` is set at runtime for DB access.
+- For production CORS, set `CORS_ORIGINS` instead of `ALLOW_ALL_CORS`.
 
 ## Architecture quickly
 
