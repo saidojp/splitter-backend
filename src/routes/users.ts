@@ -34,22 +34,26 @@ const router = Router();
 router.get("/:id", async (req, res: Response) => {
   try {
     const id = Number(req.params.id);
-    if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+    if (!Number.isFinite(id))
+      return res.status(400).json({ error: "Invalid id" });
     const user = await prisma.user.findUnique({
       where: { id },
-      // avatarUrl is added in schema; until `prisma generate` runs, avoid TS errors
-      select: { id: true, email: true, username: true, uniqueId: true } as any,
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        uniqueId: true,
+        avatarUrl: true,
+      },
     });
     if (!user) return res.status(404).json({ error: "User not found" });
 
-    const avatarUrl = (user as any).avatarUrl ?? null;
-    const finalAvatar = avatarUrl ?? getDefaultAvatarUrl();
     return res.json({
       id: user.id,
       email: user.email,
       username: user.username,
       uniqueId: user.uniqueId,
-      avatarUrl: finalAvatar,
+      avatarUrl: user.avatarUrl ?? getDefaultAvatarUrl(),
     });
   } catch (err) {
     console.error("GET /users/:id error:", err);
@@ -80,37 +84,45 @@ router.get("/:id", async (req, res: Response) => {
  *       200:
  *         description: Avatar updated
  */
-router.patch("/me/avatar", authenticateToken, async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
-
-    const avatarUrlRaw = req.body?.avatarUrl;
-    const avatarUrl = typeof avatarUrlRaw === "string" ? avatarUrlRaw.trim() : "";
-    if (!avatarUrl) return res.status(400).json({ error: "avatarUrl is required" });
-
-    // Strict URL validation: http/https and common image extensions
+router.patch(
+  "/me/avatar",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
     try {
-      const u = new URL(avatarUrl);
-      if (!/^https?:$/.test(u.protocol)) throw new Error("bad");
-      const pathname = (u.pathname || "").toLowerCase();
-      const isImg = /(\.png|\.jpg|\.jpeg|\.webp|\.gif)(\?|#|$)/.test(pathname);
-      if (!isImg) throw new Error("bad");
-    } catch {
-      return res.status(400).json({ error: "Invalid avatarUrl" });
-    }
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
 
-    const updated = await prisma.user.update({
-      where: { id: req.user.id },
-      data: { avatarUrl } as any,
-      select: { id: true } as any,
-    });
-    console.log("/users/me/avatar updated:", { id: updated.id });
-    return res.json({ success: true, avatarUrl });
-  } catch (err) {
-    console.error("PATCH /users/me/avatar error:", err);
-    return res.status(500).json({ error: "Server error" });
+      const avatarUrlRaw = req.body?.avatarUrl;
+      const avatarUrl =
+        typeof avatarUrlRaw === "string" ? avatarUrlRaw.trim() : "";
+      if (!avatarUrl)
+        return res.status(400).json({ error: "avatarUrl is required" });
+
+      // Strict URL validation: http/https and common image extensions
+      try {
+        const u = new URL(avatarUrl);
+        if (!/^https?:$/.test(u.protocol)) throw new Error("bad");
+        const pathname = (u.pathname || "").toLowerCase();
+        const isImg = /(\.png|\.jpg|\.jpeg|\.webp|\.gif)(\?|#|$)/.test(
+          pathname
+        );
+        if (!isImg) throw new Error("bad");
+      } catch {
+        return res.status(400).json({ error: "Invalid avatarUrl" });
+      }
+
+      const updated = await prisma.user.update({
+        where: { id: req.user.id },
+        data: { avatarUrl },
+        select: { id: true },
+      });
+      console.log("/users/me/avatar updated:", { id: updated.id });
+      return res.json({ success: true, avatarUrl });
+    } catch (err) {
+      console.error("PATCH /users/me/avatar error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
   }
-});
+);
 
 /**
  * @swagger
@@ -124,21 +136,25 @@ router.patch("/me/avatar", authenticateToken, async (req: AuthRequest, res: Resp
  *       200:
  *         description: Avatar reset
  */
-router.delete("/me/avatar", authenticateToken, async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+router.delete(
+  "/me/avatar",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
 
-    const updated = await prisma.user.update({
-      where: { id: req.user.id },
-      data: { avatarUrl: null } as any,
-      select: { id: true } as any,
-    });
-    console.log("/users/me/avatar reset:", { id: updated.id });
-    return res.json({ success: true, avatarUrl: getDefaultAvatarUrl() });
-  } catch (err) {
-    console.error("DELETE /users/me/avatar error:", err);
-    return res.status(500).json({ error: "Server error" });
+      const updated = await prisma.user.update({
+        where: { id: req.user.id },
+        data: { avatarUrl: null },
+        select: { id: true },
+      });
+      console.log("/users/me/avatar reset:", { id: updated.id });
+      return res.json({ success: true, avatarUrl: getDefaultAvatarUrl() });
+    } catch (err) {
+      console.error("DELETE /users/me/avatar error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
   }
-});
+);
 
 export default router;

@@ -74,7 +74,13 @@ router.patch(
         .update({
           where: { id: req.user.id },
           data,
-          select: { id: true, email: true, username: true, uniqueId: true },
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            uniqueId: true,
+            avatarUrl: true,
+          },
         })
         .catch((e) => {
           if ((e as any)?.code === "P2025") return null; // Prisma: record not found
@@ -158,7 +164,13 @@ router.get(
   async (_req: AuthRequest, res: Response) => {
     try {
       const users = await prisma.user.findMany({
-        select: { id: true, email: true, username: true, uniqueId: true },
+        select: {
+          id: true,
+          email: true,
+          username: true,
+          uniqueId: true,
+          avatarUrl: true,
+        },
         orderBy: { id: "asc" },
       });
       console.log("/user/list count:", users.length);
