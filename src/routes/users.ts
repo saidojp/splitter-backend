@@ -20,6 +20,11 @@ const router = Router();
  *     summary: Get public user profile by numeric id
  *     tags: [Users]
  *     parameters:
+ *       - in: query
+ *         name: raw
+ *         schema:
+ *           type: boolean
+ *         description: If true, returns raw DB avatarUrl (nullable). If false/missing, returns default avatar when DB value is null.
  *       - in: path
  *         name: id
  *         schema:
@@ -28,6 +33,22 @@ const router = Router();
  *     responses:
  *       200:
  *         description: User profile
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 id:
+ *                   type: integer
+ *                 email:
+ *                   type: string
+ *                 username:
+ *                   type: string
+ *                 uniqueId:
+ *                   type: string
+ *                 avatarUrl:
+ *                   type: string
+ *                   nullable: true
  *       404:
  *         description: User not found
  */
@@ -36,6 +57,7 @@ router.get("/:id", async (req, res: Response) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id))
       return res.status(400).json({ error: "Invalid id" });
+
     const user = await prisma.user.findUnique({
       where: { id },
       select: {
@@ -48,12 +70,18 @@ router.get("/:id", async (req, res: Response) => {
     });
     if (!user) return res.status(404).json({ error: "User not found" });
 
+    const rawParam = String(req.query.raw ?? "").toLowerCase();
+    const isRaw = rawParam === "true" || rawParam === "1";
+    const avatarUrl = isRaw
+      ? user.avatarUrl ?? null
+      : user.avatarUrl ?? getDefaultAvatarUrl();
+
     return res.json({
       id: user.id,
       email: user.email,
       username: user.username,
       uniqueId: user.uniqueId,
-      avatarUrl: user.avatarUrl ?? getDefaultAvatarUrl(),
+      avatarUrl,
     });
   } catch (err) {
     console.error("GET /users/:id error:", err);

@@ -318,6 +318,9 @@ router.post("/login", async (req, res) => {
  *                 uniqueId:
  *                   type: string
  *                   example: #1234
+ *                 avatarUrl:
+ *                   type: string
+ *                   example: https://cdn.example.com/avatars/u1.png
  *       401:
  *         description: Требуется авторизация или неверный токен
  *       404:
@@ -331,7 +334,13 @@ router.get("/me", authenticateToken, async (req: AuthRequest, res) => {
 
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      select: { id: true, email: true, username: true, uniqueId: true },
+      select: {
+        id: true,
+        email: true,
+        username: true,
+        uniqueId: true,
+        avatarUrl: true,
+      },
     });
 
     if (!user) {
