@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { Response } from "express";
 import { prisma } from "../config/prisma.js";
+import { getDefaultAvatarUrl } from "../config/app.js";
 import jwt from "jsonwebtoken";
 import { authenticateToken, type AuthRequest } from "../middleware/auth.js";
 
@@ -19,6 +20,7 @@ const userPublicSelect = {
   email: true,
   username: true,
   uniqueId: true,
+  avatarUrl: true,
 } as const;
 
 /** Helper: choose secret for friend invites */
@@ -185,6 +187,12 @@ router.post(
  *     responses:
  *       200:
  *         description: Список друзей
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/UserPublic'
  */
 router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -206,7 +214,7 @@ router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
     const friends = [
       ...asRequester.map((f) => f.receiver),
       ...asReceiver.map((f) => f.requester),
-    ];
+    ].map((u) => ({ ...u, avatarUrl: u.avatarUrl ?? getDefaultAvatarUrl() }));
     console.log("GET /friends count:", friends.length);
     return res.json(friends);
   } catch (err) {
@@ -286,6 +294,12 @@ router.get(
  *     responses:
  *       200:
  *         description: Результат поиска
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/UserPublic'
  */
 router.get(
   "/search",
@@ -302,7 +316,9 @@ router.get(
         where: { uniqueId: q },
         select: userPublicSelect,
       });
-      const result = user ? [user] : [];
+      const result = user
+        ? [{ ...user, avatarUrl: user.avatarUrl ?? getDefaultAvatarUrl() }]
+        : [];
       console.log("GET /friends/search result count:", result.length);
       return res.json(result);
     } catch (err) {

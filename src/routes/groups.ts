@@ -132,13 +132,27 @@ router.get(
           id: true,
           name: true,
           ownerId: true,
-          owner: { select: { id: true, username: true, uniqueId: true } },
+          owner: {
+            select: {
+              id: true,
+              username: true,
+              uniqueId: true,
+              avatarUrl: true,
+            },
+          },
           members: {
             orderBy: { joinedAt: "asc" },
             select: {
               userId: true,
               joinedAt: true,
-              user: { select: { id: true, username: true, uniqueId: true } },
+              user: {
+                select: {
+                  id: true,
+                  username: true,
+                  uniqueId: true,
+                  avatarUrl: true,
+                },
+              },
             },
           },
         },
@@ -155,6 +169,7 @@ router.get(
       const ownerEntry = {
         uniqueId: group.owner.uniqueId,
         username: group.owner.username,
+        avatarUrl: group.owner.avatarUrl ?? undefined,
         role: "owner" as const,
       };
       const memberEntries = group.members
@@ -162,6 +177,7 @@ router.get(
         .map((m) => ({
           uniqueId: m.user.uniqueId,
           username: m.user.username,
+          avatarUrl: m.user.avatarUrl ?? undefined,
           role: "member" as const,
         }));
 

@@ -17,6 +17,25 @@ const options = {
         },
       },
       schemas: {
+        UserPublic: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            email: { type: "string" },
+            username: { type: "string" },
+            uniqueId: { type: "string" },
+            avatarUrl: { type: "string", nullable: true },
+          },
+        },
+        UserSelf: {
+          allOf: [
+            { $ref: "#/components/schemas/UserPublic" },
+            {
+              type: "object",
+              properties: {},
+            },
+          ],
+        },
         Friendship: {
           type: "object",
           properties: {
