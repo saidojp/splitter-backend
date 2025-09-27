@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: supersecret
+      POSTGRES_DB: mydb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d mydb -h localhost"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  splitter-backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: splitter-backend
+    restart: always
+    env_file:
+      - .env
+    environment:
+      PORT: "8080"
+      DATABASE_URL: "postgresql://admin:supersecret@postgres:5432/mydb?schema=public"
+      NODE_ENV: "production"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+volumes:
+  postgres_data:
