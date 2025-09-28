@@ -72,6 +72,52 @@ const options = {
             createdAt: { type: "string" },
           },
         },
+        SessionParticipant: {
+          type: "object",
+          properties: {
+            amountOwed: { type: "number" },
+            user: { $ref: "#/components/schemas/UserPublic" },
+          },
+        },
+        ReceiptItem: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            name: { type: "string" },
+            price: { type: "number" },
+            assignedUserIds: {
+              type: "array",
+              items: { type: "integer" },
+            },
+          },
+        },
+        SessionDetail: {
+          allOf: [
+            { $ref: "#/components/schemas/Session" },
+            {
+              type: "object",
+              properties: {
+                creator: { $ref: "#/components/schemas/UserPublic" },
+                group: {
+                  type: "object",
+                  nullable: true,
+                  properties: {
+                    id: { type: "integer" },
+                    name: { type: "string" },
+                  },
+                },
+                participants: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/SessionParticipant" },
+                },
+                items: {
+                  type: "array",
+                  items: { $ref: "#/components/schemas/ReceiptItem" },
+                },
+              },
+            },
+          ],
+        },
       },
     },
     security: [
