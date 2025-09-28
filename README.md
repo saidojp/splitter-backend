@@ -69,6 +69,15 @@ Health check: `GET /health` → `{ "status": "ok" }`
 
 Auth routes mounted at `/auth` (`/auth/register`, `/auth/login`, `/auth/me`).
 
+### API decimals (Prisma)
+
+Prisma Decimal fields are serialized as JSON strings by default. Endpoints that include money-like values (e.g., `Session.total`, `Session.serviceFee`, `SessionParticipant.amountOwed`, `ReceiptItem.price`) will return strings such as `"12.50"`.
+
+- Pros: avoids floating-point rounding issues.
+- Client tip: parse as decimal/BigInt/Big.js on the frontend or keep as strings until final display.
+
+Swagger docs reflect this by documenting these fields as `type: string` with a note.
+
 ### Docker
 
 Build image:

@@ -27,6 +27,10 @@ const router = Router();
  *         application/json:
  *           schema:
  *             $ref: '#/components/schemas/SessionCreateInput'
+ *           example:
+ *             groupId: 1
+ *             serviceFee: 2.50
+ *             total: 100.00
  *     responses:
  *       200:
  *         description: Session created
@@ -34,6 +38,15 @@ const router = Router();
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/Session'
+ *             example:
+ *               id: 42
+ *               creatorId: 7
+ *               groupId: 1
+ *               receiptImageUrl: null
+ *               serviceFee: "2.50"
+ *               total: "100.00"
+ *               status: "ACTIVE"
+ *               createdAt: "2025-09-28T12:34:56.000Z"
  */
 /**
  * @swagger
@@ -127,6 +140,23 @@ router.post("/", authenticateToken, async (req: AuthRequest, res: Response) => {
  *               type: array
  *               items:
  *                 $ref: '#/components/schemas/Session'
+ *             example:
+ *               - id: 43
+ *                 creatorId: 7
+ *                 groupId: 1
+ *                 receiptImageUrl: null
+ *                 serviceFee: "1.20"
+ *                 total: "50.00"
+ *                 status: "ACTIVE"
+ *                 createdAt: "2025-09-28T10:00:00.000Z"
+ *               - id: 42
+ *                 creatorId: 7
+ *                 groupId: null
+ *                 receiptImageUrl: "https://example.com/r/42.jpg"
+ *                 serviceFee: "0.00"
+ *                 total: "25.50"
+ *                 status: "CLOSED"
+ *                 createdAt: "2025-09-27T18:22:00.000Z"
  */
 router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -159,6 +189,7 @@ router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
         id: true,
         creatorId: true,
         groupId: true,
+        receiptImageUrl: true,
         total: true,
         serviceFee: true,
         status: true,
@@ -193,6 +224,48 @@ router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/SessionDetail'
+ *             example:
+ *               id: 42
+ *               creatorId: 7
+ *               groupId: 1
+ *               receiptImageUrl: null
+ *               serviceFee: "2.50"
+ *               total: "100.00"
+ *               status: "ACTIVE"
+ *               createdAt: "2025-09-28T12:34:56.000Z"
+ *               creator:
+ *                 id: 7
+ *                 email: "alice@example.com"
+ *                 username: "alice"
+ *                 uniqueId: "#1234"
+ *                 avatarUrl: "https://placehold.co/128x128?text=Avatar"
+ *               group:
+ *                 id: 1
+ *                 name: "Trip"
+ *               participants:
+ *                 - amountOwed: "20.00"
+ *                   user:
+ *                     id: 7
+ *                     email: "alice@example.com"
+ *                     username: "alice"
+ *                     uniqueId: "#1234"
+ *                     avatarUrl: "https://placehold.co/128x128?text=Avatar"
+ *                 - amountOwed: "80.00"
+ *                   user:
+ *                     id: 9
+ *                     email: "bob@example.com"
+ *                     username: "bob"
+ *                     uniqueId: "#5678"
+ *                     avatarUrl: "https://placehold.co/128x128?text=Avatar"
+ *               items:
+ *                 - id: 100
+ *                   name: "Pizza"
+ *                   price: "30.00"
+ *                   assignedUserIds: [7, 9]
+ *                 - id: 101
+ *                   name: "Drinks"
+ *                   price: "20.00"
+ *                   assignedUserIds: [9]
  *       403:
  *         description: Forbidden
  *       404:
