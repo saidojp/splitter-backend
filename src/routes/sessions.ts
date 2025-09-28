@@ -26,20 +26,14 @@ const router = Router();
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             properties:
- *               groupId:
- *                 type: integer
- *                 nullable: true
- *               serviceFee:
- *                 type: number
- *                 nullable: true
- *               total:
- *                 type: number
- *                 nullable: true
+ *             $ref: '#/components/schemas/SessionCreateInput'
  *     responses:
  *       200:
  *         description: Session created
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Session'
  */
 /**
  * @swagger
@@ -127,6 +121,12 @@ router.post("/", authenticateToken, async (req: AuthRequest, res: Response) => {
  *     responses:
  *       200:
  *         description: Sessions list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/Session'
  */
 router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
   try {

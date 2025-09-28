@@ -66,8 +66,14 @@ const options = {
             creatorId: { type: "integer" },
             groupId: { type: "integer", nullable: true },
             receiptImageUrl: { type: "string", nullable: true },
-            serviceFee: { type: "number" },
-            total: { type: "number" },
+            serviceFee: {
+              type: "string",
+              description: "Decimal serialized as string",
+            },
+            total: {
+              type: "string",
+              description: "Decimal serialized as string",
+            },
             status: { type: "string", enum: ["ACTIVE", "CLOSED", "CANCELED"] },
             createdAt: { type: "string" },
           },
@@ -75,7 +81,10 @@ const options = {
         SessionParticipant: {
           type: "object",
           properties: {
-            amountOwed: { type: "number" },
+            amountOwed: {
+              type: "string",
+              description: "Decimal serialized as string",
+            },
             user: { $ref: "#/components/schemas/UserPublic" },
           },
         },
@@ -84,7 +93,10 @@ const options = {
           properties: {
             id: { type: "integer" },
             name: { type: "string" },
-            price: { type: "number" },
+            price: {
+              type: "string",
+              description: "Decimal serialized as string",
+            },
             assignedUserIds: {
               type: "array",
               items: { type: "integer" },
