@@ -78,6 +78,47 @@ Prisma Decimal fields are serialized as JSON strings by default. Endpoints that 
 
 Swagger docs reflect this by documenting these fields as `type: string` with a note.
 
+## CDN recommendations (avatars and other assets)
+
+If you host avatars or static assets behind a CDN (recommended), here are practical tips:
+
+### Caching headers
+
+- For immutable, versioned files: `Cache-Control: public, max-age=31536000, immutable`
+- For files that can change at the same URL: use shorter TTLs or enable `ETag`/`Last-Modified` validation
+- Always serve over HTTPS; set correct `Content-Type` (e.g., `image/webp`)
+
+### Versioning strategies
+
+- Filename versioning: `avatars/u123/v5/avatar.webp` (bump the folder or filename on updates)
+- Query param versioning: `avatars/u123/avatar.webp?v=5` (works, but less optimal for some CDNs)
+- Both ensure you can cache aggressively without stale content
+
+### Example URL patterns
+
+```text
+# Immutable, versioned by path (best for long cache)
+https://cdn.example.com/avatars/u123/v5/avatar.webp
+
+# Versioned by query param
+https://cdn.example.com/avatars/u123/avatar.webp?v=5
+
+# Resized/optimized variant (if CDN supports on-the-fly transforms)
+https://cdn.example.com/avatars/u123/v5/avatar.webp?w=128&h=128&fit=cover
+
+# Signed/private URL (pattern varies by provider)
+https://cdn.example.com/private/avatars/u123/v5/avatar.webp?X-Signature=...&X-Expires=...
+```
+
+### Operational tips
+
+- Prefer modern formats (WebP/AVIF) and provide fallbacks if needed
+- Place your default avatar (DEFAULT_AVATAR_URL) on the CDN for consistent performance
+- If you replace files in-place, purge CDN cache ("invalidate") or change the URL version
+- Consider a domain allowlist for user-provided avatar URLs (e.g., only `cdn.example.com`) to avoid mixed-content or slow origins
+
+Popular setups: S3/CloudFront, Cloudflare R2 + Cloudflare CDN, Backblaze B2 + CDN. Store the final CDN URL in the database (as this project already does for `avatarUrl`).
+
 ### Docker
 
 Build image:
