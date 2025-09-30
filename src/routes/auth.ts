@@ -217,6 +217,35 @@ router.post("/register", async (req, res) => {
  *     responses:
  *       200:
  *         description: Успешный вход
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 token:
+ *                   type: string
+ *                 user:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                     email:
+ *                       type: string
+ *                     username:
+ *                       type: string
+ *                     uniqueId:
+ *                       type: string
+ *                     avatarUrl:
+ *                       type: string
+ *                       nullable: true
+ *             example:
+ *               token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *               user:
+ *                 id: 1
+ *                 email: user@example.com
+ *                 username: John
+ *                 uniqueId: "#1234"
+ *                 avatarUrl: https://static.splitter.qzz.io/avatars/1/v1696070000/avatar.webp
  *       400:
  *         description: Неверные учетные данные
  *       415:
@@ -281,6 +310,7 @@ router.post("/login", async (req, res) => {
         email: user.email,
         username: user.username,
         uniqueId: user.uniqueId,
+        avatarUrl: user.avatarUrl ?? null,
       },
     });
   } catch (err) {
