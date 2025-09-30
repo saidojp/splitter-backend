@@ -72,7 +72,37 @@ router.post("/", authenticateToken, async (req: AuthRequest, res: Response) => {
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Groups list
+ *         description: Groups list with counts and members
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: array
+ *               items:
+ *                 $ref: '#/components/schemas/GroupListItem'
+ *             example:
+ *               - id: 10
+ *                 name: "Trip"
+ *                 ownerId: 1
+ *                 createdAt: "2025-09-30T09:00:00.000Z"
+ *                 counts:
+ *                   members: 3
+ *                   sessions: 2
+ *                 members:
+ *                   - id: 1
+ *                     uniqueId: "#1111"
+ *                     username: "alice"
+ *                     avatarUrl: "https://static.splitter.qzz.io/avatars/1/v1696070000/avatar.webp"
+ *                     role: "owner"
+ *                   - id: 2
+ *                     uniqueId: "#2222"
+ *                     username: "bob"
+ *                     avatarUrl: null
+ *                     role: "member"
+ *                   - id: 3
+ *                     uniqueId: "#3333"
+ *                     username: "carol"
+ *                     avatarUrl: null
+ *                     role: "member"
  */
 router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
   try {
@@ -88,10 +118,58 @@ router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
         ownerId: true,
         createdAt: true,
         _count: { select: { members: true, sessions: true } },
+        owner: {
+          select: {
+            id: true,
+            username: true,
+            uniqueId: true,
+            avatarUrl: true,
+          },
+        },
+        members: {
+          orderBy: { joinedAt: "asc" },
+          select: {
+            userId: true,
+            user: {
+              select: {
+                id: true,
+                username: true,
+                uniqueId: true,
+                avatarUrl: true,
+              },
+            },
+          },
+        },
       },
       orderBy: { id: "asc" },
     });
-    return res.json(groups);
+    const response = groups.map((g) => {
+      const ownerEntry = {
+        id: g.owner.id,
+        uniqueId: g.owner.uniqueId,
+        username: g.owner.username,
+        avatarUrl: g.owner.avatarUrl ?? undefined,
+        role: "owner" as const,
+      };
+      const memberEntries = g.members
+        .filter((m) => m.userId !== g.ownerId)
+        .map((m) => ({
+          id: m.user.id,
+          uniqueId: m.user.uniqueId,
+          username: m.user.username,
+          avatarUrl: m.user.avatarUrl ?? undefined,
+          role: "member" as const,
+        }));
+      return {
+        id: g.id,
+        name: g.name,
+        ownerId: g.ownerId,
+        createdAt: g.createdAt,
+        counts: { members: g._count.members, sessions: g._count.sessions },
+        members: [ownerEntry, ...memberEntries],
+      };
+    });
+    return res.json(response);
   } catch (err) {
     console.error("GET /groups error:", err);
     return res.status(500).json({ error: "Server error" });

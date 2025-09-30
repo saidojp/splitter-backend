@@ -57,6 +57,28 @@ const options = {
           },
           required: ["group", "role", "members"],
         },
+        GroupListItem: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            name: { type: "string" },
+            ownerId: { type: "integer" },
+            createdAt: { type: "string" },
+            counts: {
+              type: "object",
+              properties: {
+                members: { type: "integer" },
+                sessions: { type: "integer" },
+              },
+              required: ["members", "sessions"],
+            },
+            members: {
+              type: "array",
+              items: { $ref: "#/components/schemas/GroupMemberEntry" },
+            },
+          },
+          required: ["id", "name", "ownerId", "createdAt", "counts", "members"],
+        },
         UserSelf: {
           allOf: [
             { $ref: "#/components/schemas/UserPublic" },
