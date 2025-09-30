@@ -3,6 +3,10 @@ import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { prisma } from "../config/prisma.js";
 import { authenticateToken, type AuthRequest } from "../middleware/auth.js";
+import {
+  isStrongPassword,
+  PASSWORD_POLICY_MESSAGE,
+} from "../utils/validation.js";
 
 const router = Router();
 
@@ -41,13 +45,14 @@ function generateUniqueId() {
  *                 example: user@example.com
  *               password:
  *                 type: string
- *                 example: 123456
+ *                 example: Aa1!secure
+ *                 description: Must be at least 8 characters and include uppercase, lowercase, number, and special character
  *               username:
  *                 type: string
  *                 example: John
  *           example:
  *             email: "user@example.com"
- *             password: "123456"
+ *             password: "Aa1!secure"
  *             username: "John"
  *     responses:
  *       200:
@@ -121,10 +126,8 @@ router.post("/register", async (req, res) => {
     if (!emailRegex.test(cleanEmail)) {
       return res.status(400).json({ error: "Invalid email format" });
     }
-    if (cleanPassword.length < 6) {
-      return res
-        .status(400)
-        .json({ error: "Password must be at least 6 characters" });
+    if (!isStrongPassword(cleanPassword)) {
+      return res.status(400).json({ error: PASSWORD_POLICY_MESSAGE });
     }
 
     const existingUser = await prisma.user.findUnique({

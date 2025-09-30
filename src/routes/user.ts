@@ -3,6 +3,11 @@ import type { Response } from "express";
 import bcrypt from "bcrypt";
 import { prisma } from "../config/prisma.js";
 import { authenticateToken, type AuthRequest } from "../middleware/auth.js";
+import {
+  hasJsonContentType,
+  isStrongPassword,
+  PASSWORD_POLICY_MESSAGE,
+} from "../utils/validation.js";
 
 const router = Router();
 
@@ -39,6 +44,8 @@ const router = Router();
  *         description: User data updated
  *       400:
  *         description: No fields to update
+ *       415:
+ *         description: Invalid Content-Type (application/json required)
  *       401:
  *         description: Unauthorized
  *       404:
@@ -49,6 +56,11 @@ router.patch(
   authenticateToken,
   async (req: AuthRequest, res: Response) => {
     try {
+      if (!hasJsonContentType(req)) {
+        return res
+          .status(415)
+          .json({ error: "Content-Type must be application/json" });
+      }
       if (!req.user) {
         return res.status(401).json({ error: "Unauthorized" });
       }
@@ -63,6 +75,9 @@ router.patch(
         data.username = username.trim();
       }
       if (typeof password === "string" && password) {
+        if (!isStrongPassword(password)) {
+          return res.status(400).json({ error: PASSWORD_POLICY_MESSAGE });
+        }
         data.password = await bcrypt.hash(password, 10);
       }
 
@@ -124,6 +139,8 @@ router.patch(
  *         description: Username updated
  *       400:
  *         description: Invalid username
+ *       415:
+ *         description: Invalid Content-Type (application/json required)
  *       401:
  *         description: Unauthorized
  *       404:
@@ -134,6 +151,11 @@ router.patch(
   authenticateToken,
   async (req: AuthRequest, res: Response) => {
     try {
+      if (!hasJsonContentType(req)) {
+        return res
+          .status(415)
+          .json({ error: "Content-Type must be application/json" });
+      }
       if (!req.user) return res.status(401).json({ error: "Unauthorized" });
 
       const { username } = req.body ?? {};
@@ -198,6 +220,8 @@ router.patch(
  *         description: Email updated
  *       400:
  *         description: Invalid email
+ *       415:
+ *         description: Invalid Content-Type (application/json required)
  *       401:
  *         description: Unauthorized
  *       404:
@@ -210,6 +234,11 @@ router.patch(
   authenticateToken,
   async (req: AuthRequest, res: Response) => {
     try {
+      if (!hasJsonContentType(req)) {
+        return res
+          .status(415)
+          .json({ error: "Content-Type must be application/json" });
+      }
       if (!req.user) return res.status(401).json({ error: "Unauthorized" });
 
       const { email } = req.body ?? {};
@@ -273,12 +302,15 @@ router.patch(
  *                 example: oldPass123
  *               newPassword:
  *                 type: string
- *                 example: newStrongPassword123
+ *                 example: Aa1!secure
+ *                 description: Must be at least 8 characters and include uppercase, lowercase, number, and special character
  *     responses:
  *       200:
  *         description: Password updated
  *       400:
  *         description: Invalid input or wrong current password
+ *       415:
+ *         description: Invalid Content-Type (application/json required)
  *       401:
  *         description: Unauthorized
  *       404:
@@ -289,6 +321,11 @@ router.patch(
   authenticateToken,
   async (req: AuthRequest, res: Response) => {
     try {
+      if (!hasJsonContentType(req)) {
+        return res
+          .status(415)
+          .json({ error: "Content-Type must be application/json" });
+      }
       if (!req.user) return res.status(401).json({ error: "Unauthorized" });
 
       const { currentPassword, newPassword } = req.body ?? {};
@@ -300,10 +337,8 @@ router.patch(
           .status(400)
           .json({ error: "Both currentPassword and newPassword are required" });
       }
-      if (newPassword.length < 6) {
-        return res
-          .status(400)
-          .json({ error: "New password must be at least 6 characters" });
+      if (!isStrongPassword(newPassword)) {
+        return res.status(400).json({ error: PASSWORD_POLICY_MESSAGE });
       }
 
       const user = await prisma.user.findUnique({ where: { id: req.user.id } });
