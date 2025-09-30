@@ -42,6 +42,15 @@ Env variables (minimum):
 - `DEBUG_AUTH=1` — verbose JWT verification logs
 - `DEFAULT_AVATAR_URL` — fallback avatar URL (optional)
 
+R2/Uploads (optional, for server-side avatar upload):
+
+- `R2_ENDPOINT` — e.g. https://<accountid>.r2.cloudflarestorage.com
+- `R2_ACCESS_KEY_ID` — R2 access key id
+- `R2_SECRET_ACCESS_KEY` — R2 secret key
+- `R2_BUCKET` — bucket name
+- `CDN_BASE_URL` — public CDN base, e.g. https://static.splitter.qzz.io
+- `AVATAR_MAX_BYTES` — max upload size in bytes (default 2MB)
+
 3. Prisma (first time or after schema changes)
 
 ```bash
