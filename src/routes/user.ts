@@ -101,6 +101,237 @@ router.patch(
 
 /**
  * @swagger
+ * /user/username:
+ *   patch:
+ *     summary: Update username
+ *     description: Change only the username of the current user.
+ *     tags: [User]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [username]
+ *             properties:
+ *               username:
+ *                 type: string
+ *                 example: NewName
+ *     responses:
+ *       200:
+ *         description: Username updated
+ *       400:
+ *         description: Invalid username
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User not found
+ */
+router.patch(
+  "/username",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+
+      const { username } = req.body ?? {};
+      if (typeof username !== "string") {
+        return res.status(400).json({ error: "Username must be a string" });
+      }
+      const clean = username.trim();
+      if (!clean || clean.length < 2 || clean.length > 32) {
+        return res
+          .status(400)
+          .json({ error: "Username must be 2-32 characters" });
+      }
+
+      const updated = await prisma.user
+        .update({
+          where: { id: req.user.id },
+          data: { username: clean },
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            uniqueId: true,
+            avatarUrl: true,
+          },
+        })
+        .catch((e) => {
+          if ((e as any)?.code === "P2025") return null;
+          throw e;
+        });
+
+      if (!updated) return res.status(404).json({ error: "User not found" });
+      return res.json(updated);
+    } catch (err) {
+      console.error("/user/username error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /user/email:
+ *   patch:
+ *     summary: Update email
+ *     description: Change only the email of the current user.
+ *     tags: [User]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email]
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: new@example.com
+ *     responses:
+ *       200:
+ *         description: Email updated
+ *       400:
+ *         description: Invalid email
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User not found
+ *       409:
+ *         description: Email already in use
+ */
+router.patch(
+  "/email",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+
+      const { email } = req.body ?? {};
+      if (typeof email !== "string") {
+        return res.status(400).json({ error: "Email must be a string" });
+      }
+      const clean = email.trim().toLowerCase();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!clean || !emailRegex.test(clean)) {
+        return res.status(400).json({ error: "Invalid email format" });
+      }
+
+      try {
+        const updated = await prisma.user.update({
+          where: { id: req.user.id },
+          data: { email: clean },
+          select: {
+            id: true,
+            email: true,
+            username: true,
+            uniqueId: true,
+            avatarUrl: true,
+          },
+        });
+        return res.json(updated);
+      } catch (e: any) {
+        if (e?.code === "P2002") {
+          return res.status(409).json({ error: "Email already in use" });
+        }
+        if (e?.code === "P2025") {
+          return res.status(404).json({ error: "User not found" });
+        }
+        throw e;
+      }
+    } catch (err) {
+      console.error("/user/email error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /user/password:
+ *   patch:
+ *     summary: Update password
+ *     description: Change password by providing the current password and a new one.
+ *     tags: [User]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [currentPassword, newPassword]
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *                 example: oldPass123
+ *               newPassword:
+ *                 type: string
+ *                 example: newStrongPassword123
+ *     responses:
+ *       200:
+ *         description: Password updated
+ *       400:
+ *         description: Invalid input or wrong current password
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User not found
+ */
+router.patch(
+  "/password",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+
+      const { currentPassword, newPassword } = req.body ?? {};
+      if (
+        typeof currentPassword !== "string" ||
+        typeof newPassword !== "string"
+      ) {
+        return res
+          .status(400)
+          .json({ error: "Both currentPassword and newPassword are required" });
+      }
+      if (newPassword.length < 6) {
+        return res
+          .status(400)
+          .json({ error: "New password must be at least 6 characters" });
+      }
+
+      const user = await prisma.user.findUnique({ where: { id: req.user.id } });
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const ok = await bcrypt.compare(currentPassword, user.password);
+      if (!ok) {
+        return res.status(400).json({ error: "Current password is incorrect" });
+      }
+
+      const hashed = await bcrypt.hash(newPassword, 10);
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data: { password: hashed },
+      });
+
+      return res.json({ success: true });
+    } catch (err) {
+      console.error("/user/password error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
  * /user/delete:
  *   delete:
  *     summary: Delete user account
