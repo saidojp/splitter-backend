@@ -61,9 +61,41 @@ function pickExtByMime(
  *               file:
  *                 type: string
  *                 format: binary
+ *           encoding:
+ *             file:
+ *               contentType: image/webp, image/jpeg, image/png, image/gif
+ *       description: |
+ *         Upload image using multipart/form-data with the field name `file`.
+ *
+ *         Example (cURL):
+ *
+ *           curl -X POST "https://api.example.com/uploads/avatar" \
+ *             -H "Authorization: Bearer <TOKEN>" \
+ *             -H "Content-Type: multipart/form-data" \
+ *             -F "file=@/path/to/avatar.webp"
  *     responses:
  *       200:
  *         description: Avatar uploaded and saved
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 avatarUrl:
+ *                   type: string
+ *                   example: https://static.splitter.qzz.io/avatars/123/v1696070000/avatar.webp
+ *                 key:
+ *                   type: string
+ *                   example: avatars/123/v1696070000/avatar.webp
+ *       400:
+ *         description: Bad request (e.g., missing file or unsupported type)
+ *       401:
+ *         description: Unauthorized
+ *       413:
+ *         description: Payload too large (exceeds AVATAR_MAX_BYTES)
  */
 router.post(
   "/avatar",
