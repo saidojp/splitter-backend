@@ -167,6 +167,7 @@ router.get(
 
       // Build members: owner first with role=owner, then all group members (excluding owner) with role=member
       const ownerEntry = {
+        id: group.owner.id,
         uniqueId: group.owner.uniqueId,
         username: group.owner.username,
         avatarUrl: group.owner.avatarUrl ?? undefined,
@@ -175,6 +176,7 @@ router.get(
       const memberEntries = group.members
         .filter((m) => m.userId !== group.ownerId)
         .map((m) => ({
+          id: m.user.id,
           uniqueId: m.user.uniqueId,
           username: m.user.username,
           avatarUrl: m.user.avatarUrl ?? undefined,
