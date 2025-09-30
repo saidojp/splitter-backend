@@ -18,6 +18,13 @@ type ReqFileMinimal = { buffer: Buffer; mimetype: string; size: number };
 
 const router = Router();
 
+/**
+ * @swagger
+ * tags:
+ *   name: Uploads
+ *   description: File uploads (avatars)
+ */
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
@@ -41,7 +48,7 @@ function pickExtByMime(
  * /uploads/avatar:
  *   post:
  *     summary: Upload user avatar (multipart/form-data)
- *     tags: [User]
+ *     tags: [Uploads]
  *     security:
  *       - bearerAuth: []
  *     requestBody:
