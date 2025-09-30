@@ -27,6 +27,36 @@ const options = {
             avatarUrl: { type: "string", nullable: true },
           },
         },
+        GroupMemberEntry: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            uniqueId: { type: "string" },
+            username: { type: "string" },
+            avatarUrl: { type: "string", nullable: true },
+            role: { type: "string", enum: ["owner", "member"] },
+          },
+          required: ["id", "uniqueId", "username", "role"],
+        },
+        GroupMembersResponse: {
+          type: "object",
+          properties: {
+            group: {
+              type: "object",
+              properties: {
+                id: { type: "integer" },
+                name: { type: "string" },
+              },
+              required: ["id", "name"],
+            },
+            role: { type: "string", enum: ["owner", "member"] },
+            members: {
+              type: "array",
+              items: { $ref: "#/components/schemas/GroupMemberEntry" },
+            },
+          },
+          required: ["group", "role", "members"],
+        },
         UserSelf: {
           allOf: [
             { $ref: "#/components/schemas/UserPublic" },

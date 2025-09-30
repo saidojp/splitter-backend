@@ -115,6 +115,26 @@ router.get("/", authenticateToken, async (req: AuthRequest, res: Response) => {
  *     responses:
  *       200:
  *         description: Group participants
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/GroupMembersResponse'
+ *             example:
+ *               group:
+ *                 id: 10
+ *                 name: "Trip"
+ *               role: "owner"
+ *               members:
+ *                 - id: 1
+ *                   uniqueId: "#1111"
+ *                   username: "alice"
+ *                   avatarUrl: "https://static.splitter.qzz.io/avatars/1/v1696070000/avatar.webp"
+ *                   role: "owner"
+ *                 - id: 2
+ *                   uniqueId: "#2222"
+ *                   username: "bob"
+ *                   avatarUrl: null
+ *                   role: "member"
  */
 router.get(
   "/:groupId",
