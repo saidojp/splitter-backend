@@ -160,6 +160,8 @@ model ReceiptParse {
   confidence        Decimal?
   errorMessage      String?
   translationApplied Boolean          @default(false)
+  linesCount        Int               @default(0)
+  itemsCount        Int               @default(0)
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
 

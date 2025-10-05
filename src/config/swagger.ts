@@ -222,8 +222,29 @@ const options = {
                 provider: { type: "string", nullable: true },
                 model: { type: "string", nullable: true },
                 errorMessage: { type: "string", nullable: true },
+                linesCount: { type: "integer" },
+                itemsCount: { type: "integer" },
+                updatedAt: { type: "string", nullable: true },
               },
-              required: ["status", "translationApplied"],
+              required: [
+                "status",
+                "translationApplied",
+                "linesCount",
+                "itemsCount",
+              ],
+            },
+            participants: {
+              type: "array",
+              description:
+                "Session participants (creator implicitly included if present in list)",
+              items: {
+                type: "object",
+                properties: {
+                  userId: { type: "integer" },
+                  amountOwed: { type: "number" },
+                },
+                required: ["userId", "amountOwed"],
+              },
             },
             items: {
               type: "array",
@@ -237,6 +258,7 @@ const options = {
             "total",
             "status",
             "createdAt",
+            "participants",
             "items",
           ],
           example: {
@@ -255,7 +277,14 @@ const options = {
               translationApplied: true,
               provider: "gemini",
               model: "gemini-1.5-flash",
+              linesCount: 18,
+              itemsCount: 12,
+              updatedAt: "2025-10-05T10:20:00.000Z",
             },
+            participants: [
+              { userId: 1, amountOwed: 0 },
+              { userId: 7, amountOwed: 5.2 },
+            ],
             items: [
               {
                 id: 1001,

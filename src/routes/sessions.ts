@@ -9,6 +9,90 @@ import {
 
 const router = Router();
 
+// Helper to check if user is allowed (creator, group member, or participant)
+async function authorizeSessionAccess(sessionId: number, userId: number) {
+  const session = await prisma.session.findUnique({
+    where: { id: sessionId },
+    select: {
+      id: true,
+      creatorId: true,
+      groupId: true,
+      receiptImageUrl: true,
+      serviceFee: true,
+      total: true,
+      status: true,
+      createdAt: true,
+      participants: { select: { userId: true } },
+      group: {
+        select: {
+          id: true,
+          members: { select: { userId: true } },
+          ownerId: true,
+        },
+      },
+    },
+  });
+  if (!session) return { allowed: false, notFound: true } as const;
+  if (session.creatorId === userId) return { allowed: true, session } as const;
+  // group membership
+  if (session.group) {
+    if (session.group.ownerId === userId) return { allowed: true, session } as const;
+    if (session.group.members.some((m) => m.userId === userId)) {
+      return { allowed: true, session } as const;
+    }
+  }
+  // participant membership
+  if (session.participants.some((p) => p.userId === userId)) {
+    return { allowed: true, session } as const;
+  }
+  return { allowed: false, session } as const;
+}
+
+// Central helper to build parse summary (cached counts first, fallback to compute array length)
+async function buildParseSummary(sessionId: number) {
+  const parseRec = await (prisma as any).receiptParse.findUnique({
+    where: { sessionId },
+    select: {
+      status: true,
+      detectedLanguage: true,
+      targetLanguage: true,
+      translationApplied: true,
+      provider: true,
+      model: true,
+      errorMessage: true,
+      linesCount: true,
+      itemsCount: true,
+      updatedAt: true,
+    },
+  });
+  if (!parseRec) {
+    return {
+      status: "PENDING",
+      detectedLanguage: null,
+      targetLanguage: null,
+      translationApplied: false,
+      provider: null,
+      model: null,
+      errorMessage: null,
+      linesCount: 0,
+      itemsCount: 0,
+      updatedAt: null,
+    };
+  }
+  return {
+    status: parseRec.status,
+    detectedLanguage: parseRec.detectedLanguage,
+    targetLanguage: parseRec.targetLanguage,
+    translationApplied: parseRec.translationApplied,
+    provider: parseRec.provider,
+    model: parseRec.model,
+    errorMessage: parseRec.errorMessage,
+    linesCount: parseRec.linesCount || 0,
+    itemsCount: parseRec.itemsCount || 0,
+    updatedAt: parseRec.updatedAt,
+  };
+}
+
 /**
  * @swagger
  * tags:
@@ -219,65 +303,35 @@ router.get(
       if (!Number.isFinite(sessionId)) {
         return res.status(400).json({ error: "Invalid sessionId" });
       }
-      const session = await prisma.session.findUnique({
-        where: { id: sessionId },
-        select: {
-          id: true,
-          creatorId: true,
-          groupId: true,
-          receiptImageUrl: true,
-          serviceFee: true,
-          total: true,
-          status: true,
-          createdAt: true,
-          // relation parse intentionally NOT included directly (we fetch separately for lightweight summary)
-        },
-      });
-      if (!session) return res.status(404).json({ error: "Session not found" });
-      if (session.creatorId !== req.user.id) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-      const parseRec = await (prisma as any).receiptParse.findUnique({
-        where: { sessionId },
-        select: {
-          status: true,
-          detectedLanguage: true,
-          targetLanguage: true,
-          translationApplied: true,
-          provider: true,
-          model: true,
-          errorMessage: true,
-          lines: { select: { id: true, isItem: true } },
-        },
-      });
+      const auth = await authorizeSessionAccess(sessionId, req.user.id);
+      if (auth.notFound) return res.status(404).json({ error: "Session not found" });
+      if (!auth.allowed) return res.status(403).json({ error: "Forbidden" });
+      const s = auth.session!;
+      const parseSummary = await buildParseSummary(sessionId);
       const items = await prisma.receiptItem.findMany({
         where: { sessionId },
         select: { id: true, sessionId: true, name: true, price: true },
         orderBy: { id: "asc" },
       });
+      // participants list
+      const participants = await prisma.sessionParticipant.findMany({
+        where: { sessionId },
+        select: { userId: true, amountOwed: true },
+      });
       return res.json({
-        id: session.id,
-        creatorId: session.creatorId,
-        groupId: session.groupId,
-        receiptImageUrl: session.receiptImageUrl,
-        serviceFee: Number(session.serviceFee),
-        total: Number(session.total),
-        status: session.status,
-        createdAt: session.createdAt,
-        parse: parseRec
-          ? {
-              status: parseRec.status,
-              detectedLanguage: parseRec.detectedLanguage,
-              targetLanguage: parseRec.targetLanguage,
-              translationApplied: parseRec.translationApplied,
-              provider: parseRec.provider,
-              model: parseRec.model,
-              errorMessage: parseRec.errorMessage,
-              linesCount: parseRec.lines?.length || 0,
-              itemsCount:
-                parseRec.lines?.filter((l: any) => l.isItem).length || 0,
-            }
-          : null,
+        id: s.id,
+        creatorId: s.creatorId,
+        groupId: s.groupId,
+        receiptImageUrl: s.receiptImageUrl,
+        serviceFee: Number(s.serviceFee),
+        total: Number(s.total),
+        status: s.status,
+        createdAt: s.createdAt,
+        parse: parseSummary,
+        participants: participants.map((p) => ({
+          userId: p.userId,
+          amountOwed: Number(p.amountOwed),
+        })),
         items: items.map((i) => ({
           id: i.id,
           sessionId: i.sessionId,
@@ -369,47 +423,11 @@ router.get(
       if (!Number.isFinite(sessionId)) {
         return res.status(400).json({ error: "Invalid sessionId" });
       }
-      const session = await prisma.session.findUnique({
-        where: { id: sessionId },
-        select: { id: true, creatorId: true },
-      });
-      if (!session) return res.status(404).json({ error: "Session not found" });
-      if (session.creatorId !== req.user.id) {
-        return res.status(403).json({ error: "Forbidden" });
-      }
-
-      const parseRec = await (prisma as any).receiptParse.findUnique({
-        where: { sessionId },
-        include: { lines: { select: { id: true, isItem: true } } },
-      });
-      if (!parseRec) {
-        return res.json({
-          status: "PENDING",
-          detectedLanguage: null,
-          targetLanguage: null,
-          translationApplied: false,
-          provider: null,
-          model: null,
-          errorMessage: null,
-          linesCount: 0,
-          itemsCount: 0,
-          updatedAt: null,
-        });
-      }
-      const lines = parseRec.lines || [];
-      const itemsCount = lines.filter((l: any) => l.isItem).length;
-      return res.json({
-        status: parseRec.status,
-        detectedLanguage: parseRec.detectedLanguage,
-        targetLanguage: parseRec.targetLanguage,
-        translationApplied: parseRec.translationApplied,
-        provider: parseRec.provider,
-        model: parseRec.model,
-        errorMessage: parseRec.errorMessage,
-        linesCount: lines.length,
-        itemsCount,
-        updatedAt: parseRec.updatedAt,
-      });
+      const auth = await authorizeSessionAccess(sessionId, req.user.id);
+      if (auth.notFound) return res.status(404).json({ error: "Session not found" });
+      if (!auth.allowed) return res.status(403).json({ error: "Forbidden" });
+      const summary = await buildParseSummary(sessionId);
+      return res.json(summary);
     } catch (err) {
       console.error("GET /sessions/:sessionId/receipt/parse error:", err);
       return res.status(500).json({ error: "Server error" });
@@ -475,22 +493,15 @@ router.post(
         return res.status(400).json({ error: "Unsupported targetLanguage" });
       }
 
-      const session = await prisma.session.findUnique({
+      const sessionBase = await prisma.session.findUnique({
         where: { id: sessionId },
-        select: {
-          id: true,
-          creatorId: true,
-          groupId: true,
-          receiptImageUrl: true,
-        },
+        select: { id: true, creatorId: true, groupId: true, receiptImageUrl: true },
       });
-      if (!session) return res.status(404).json({ error: "Session not found" });
-      if (!session.receiptImageUrl)
+      if (!sessionBase) return res.status(404).json({ error: "Session not found" });
+      if (!sessionBase.receiptImageUrl)
         return res.status(400).json({ error: "No receiptImageUrl in session" });
-      if (session.creatorId !== req.user.id) {
-        // TODO: allow group member check in future
-        return res.status(403).json({ error: "Forbidden" });
-      }
+      const auth = await authorizeSessionAccess(sessionId, req.user.id);
+      if (!auth.allowed) return res.status(403).json({ error: "Forbidden" });
 
       // TODO: remove 'as any' once TS picks up new Prisma client types
       const existingParse = await (prisma as any).receiptParse.findUnique({
@@ -520,7 +531,7 @@ router.post(
       // Inline processing MVP
       try {
         const parsed = await parseReceiptWithGemini(
-          session.receiptImageUrl,
+          sessionBase.receiptImageUrl,
           targetLanguage,
           receiptLanguageHint
         );
@@ -553,6 +564,8 @@ router.post(
               rawJson: JSON.stringify(parsed.rawJson).slice(0, 100000),
               confidence: null,
               translationApplied: translations ? true : false,
+              linesCount: parsed.items.length,
+              itemsCount: parsed.items.length, // currently only item lines stored
             },
           });
           // Clear old lines & items (simplistic reparse strategy)
@@ -681,13 +694,9 @@ router.post(
       if (!allow.includes(targetLanguage))
         return res.status(400).json({ error: "Unsupported targetLanguage" });
 
-      const session = await prisma.session.findUnique({
-        where: { id: sessionId },
-        select: { id: true, creatorId: true },
-      });
-      if (!session) return res.status(404).json({ error: "Session not found" });
-      if (session.creatorId !== req.user.id)
-        return res.status(403).json({ error: "Forbidden" });
+      const auth = await authorizeSessionAccess(sessionId, req.user.id);
+      if (auth.notFound) return res.status(404).json({ error: "Session not found" });
+      if (!auth.allowed) return res.status(403).json({ error: "Forbidden" });
       const parseRec = await (prisma as any).receiptParse.findUnique({
         where: { sessionId },
         include: { lines: true },
