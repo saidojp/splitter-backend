@@ -105,6 +105,8 @@ model Session {
   group     Group?  @relation(fields: [groupId], references: [id])
   participants SessionParticipant[]
   items        ReceiptItem[]
+  // One-to-one parse (optional)
+  parse        ReceiptParse?
 }
 
 model SessionParticipant {
@@ -136,4 +138,52 @@ model ItemAssignment {
   user User        @relation(fields: [userId], references: [id])
 
   @@id([itemId, userId])
+}
+
+enum ReceiptParseStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model ReceiptParse {
+  id                Int                @id @default(autoincrement())
+  sessionId         Int                @unique
+  status            ReceiptParseStatus @default(PENDING)
+  provider          String?
+  model             String?
+  targetLanguage    String?
+  detectedLanguage  String?
+  rawText           String?
+  rawJson           String?
+  confidence        Decimal?
+  errorMessage      String?
+  translationApplied Boolean          @default(false)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  session           Session           @relation(fields: [sessionId], references: [id])
+  lines             ReceiptLine[]
+}
+
+model ReceiptLine {
+  id                 Int     @id @default(autoincrement())
+  receiptParseId     Int
+  lineIndex          Int
+  rawLine            String
+  normalized         String?
+  isItem             Boolean @default(false)
+  descriptionOriginal String?
+  description        String?
+  quantity           Decimal? @default(1)
+  unitPrice          Decimal?
+  lineTotal          Decimal?
+  currency           String?
+  confidence         Decimal?
+  translationConfidence Decimal?
+
+  receiptParse       ReceiptParse @relation(fields: [receiptParseId], references: [id])
+
+  @@index([receiptParseId])
 }
