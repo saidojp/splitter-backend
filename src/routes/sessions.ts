@@ -183,6 +183,113 @@ export default router;
 
 /**
  * @swagger
+ * /sessions/{sessionId}:
+ *   get:
+ *     summary: Get session detail (with receipt items & parse summary)
+ *     tags: [Sessions]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         schema:
+ *           type: integer
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Session detail
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SessionDetail'
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Session not found
+ */
+router.get(
+  "/:sessionId",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const sessionId = Number(req.params.sessionId);
+      if (!Number.isFinite(sessionId)) {
+        return res.status(400).json({ error: "Invalid sessionId" });
+      }
+      const session = await prisma.session.findUnique({
+        where: { id: sessionId },
+        select: {
+          id: true,
+          creatorId: true,
+          groupId: true,
+          receiptImageUrl: true,
+          serviceFee: true,
+          total: true,
+          status: true,
+          createdAt: true,
+          // relation parse intentionally NOT included directly (we fetch separately for lightweight summary)
+        },
+      });
+      if (!session) return res.status(404).json({ error: "Session not found" });
+      if (session.creatorId !== req.user.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+      const parseRec = await (prisma as any).receiptParse.findUnique({
+        where: { sessionId },
+        select: {
+          status: true,
+          detectedLanguage: true,
+          targetLanguage: true,
+          translationApplied: true,
+          provider: true,
+          model: true,
+          errorMessage: true,
+        },
+      });
+      const items = await prisma.receiptItem.findMany({
+        where: { sessionId },
+        select: { id: true, sessionId: true, name: true, price: true },
+        orderBy: { id: "asc" },
+      });
+      return res.json({
+        id: session.id,
+        creatorId: session.creatorId,
+        groupId: session.groupId,
+        receiptImageUrl: session.receiptImageUrl,
+        serviceFee: Number(session.serviceFee),
+        total: Number(session.total),
+        status: session.status,
+        createdAt: session.createdAt,
+        parse: parseRec
+          ? {
+              status: parseRec.status,
+              detectedLanguage: parseRec.detectedLanguage,
+              targetLanguage: parseRec.targetLanguage,
+              translationApplied: parseRec.translationApplied,
+              provider: parseRec.provider,
+              model: parseRec.model,
+              errorMessage: parseRec.errorMessage,
+            }
+          : null,
+        items: items.map((i) => ({
+          id: i.id,
+          sessionId: i.sessionId,
+          name: i.name,
+          price: Number(i.price),
+        })),
+      });
+    } catch (err) {
+      console.error("GET /sessions/:sessionId detail error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
  * /sessions/{sessionId}/receipt/parse:
  *   get:
  *     summary: Get receipt parse status & summary
