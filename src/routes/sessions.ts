@@ -184,6 +184,131 @@ export default router;
 /**
  * @swagger
  * /sessions/{sessionId}/receipt/parse:
+ *   get:
+ *     summary: Get receipt parse status & summary
+ *     tags: [Sessions]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         schema:
+ *           type: integer
+ *         required: true
+ *     responses:
+ *       200:
+ *         description: Parse summary
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   enum: [PENDING, PROCESSING, COMPLETED, FAILED]
+ *                 detectedLanguage:
+ *                   type: string
+ *                   nullable: true
+ *                 targetLanguage:
+ *                   type: string
+ *                   nullable: true
+ *                 translationApplied:
+ *                   type: boolean
+ *                 provider:
+ *                   type: string
+ *                   nullable: true
+ *                 model:
+ *                   type: string
+ *                   nullable: true
+ *                 errorMessage:
+ *                   type: string
+ *                   nullable: true
+ *                 linesCount:
+ *                   type: integer
+ *                 itemsCount:
+ *                   type: integer
+ *                 updatedAt:
+ *                   type: string
+ *               required: [status, translationApplied, linesCount, itemsCount]
+ *               example:
+ *                 status: COMPLETED
+ *                 detectedLanguage: uz
+ *                 targetLanguage: ja
+ *                 translationApplied: true
+ *                 provider: gemini
+ *                 model: gemini-1.5-flash
+ *                 errorMessage: null
+ *                 linesCount: 18
+ *                 itemsCount: 12
+ *                 updatedAt: 2025-10-05T10:20:00.000Z
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Session not found
+ */
+router.get(
+  "/:sessionId/receipt/parse",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const sessionId = Number(req.params.sessionId);
+      if (!Number.isFinite(sessionId)) {
+        return res.status(400).json({ error: "Invalid sessionId" });
+      }
+      const session = await prisma.session.findUnique({
+        where: { id: sessionId },
+        select: { id: true, creatorId: true },
+      });
+      if (!session) return res.status(404).json({ error: "Session not found" });
+      if (session.creatorId !== req.user.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      const parseRec = await (prisma as any).receiptParse.findUnique({
+        where: { sessionId },
+        include: { lines: { select: { id: true, isItem: true } } },
+      });
+      if (!parseRec) {
+        return res.json({
+          status: "PENDING",
+          detectedLanguage: null,
+          targetLanguage: null,
+          translationApplied: false,
+          provider: null,
+          model: null,
+          errorMessage: null,
+          linesCount: 0,
+          itemsCount: 0,
+          updatedAt: null,
+        });
+      }
+      const lines = parseRec.lines || [];
+      const itemsCount = lines.filter((l: any) => l.isItem).length;
+      return res.json({
+        status: parseRec.status,
+        detectedLanguage: parseRec.detectedLanguage,
+        targetLanguage: parseRec.targetLanguage,
+        translationApplied: parseRec.translationApplied,
+        provider: parseRec.provider,
+        model: parseRec.model,
+        errorMessage: parseRec.errorMessage,
+        linesCount: lines.length,
+        itemsCount,
+        updatedAt: parseRec.updatedAt,
+      });
+    } catch (err) {
+      console.error("GET /sessions/:sessionId/receipt/parse error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /sessions/{sessionId}/receipt/parse:
  *   post:
  *     summary: Parse receipt image for a session (Gemini)
  *     tags: [Sessions]
