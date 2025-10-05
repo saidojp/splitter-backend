@@ -247,6 +247,7 @@ router.get(
           provider: true,
           model: true,
           errorMessage: true,
+          lines: { select: { id: true, isItem: true } },
         },
       });
       const items = await prisma.receiptItem.findMany({
@@ -272,6 +273,9 @@ router.get(
               provider: parseRec.provider,
               model: parseRec.model,
               errorMessage: parseRec.errorMessage,
+              linesCount: parseRec.lines?.length || 0,
+              itemsCount:
+                parseRec.lines?.filter((l: any) => l.isItem).length || 0,
             }
           : null,
         items: items.map((i) => ({

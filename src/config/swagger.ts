@@ -32,8 +32,15 @@ const options = {
           properties: {
             id: { type: "integer" },
             lineIndex: { type: "integer" },
+            linesCount: { type: "integer" },
+            itemsCount: { type: "integer" },
             rawLine: { type: "string" },
-            isItem: { type: "boolean" },
+            required: [
+              "status",
+              "translationApplied",
+              "linesCount",
+              "itemsCount",
+            ],
             descriptionOriginal: { type: "string", nullable: true },
             description: {
               type: "string",
@@ -54,6 +61,8 @@ const options = {
           properties: {
             id: { type: "integer" },
             sessionId: { type: "integer" },
+            linesCount: 18,
+            itemsCount: 12,
             status: {
               type: "string",
               enum: ["PENDING", "PROCESSING", "COMPLETED", "FAILED"],
