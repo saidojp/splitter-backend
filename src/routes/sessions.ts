@@ -7,6 +7,139 @@ const router = Router();
 
 /**
  * @swagger
+ * /sessions/scan:
+ *   post:
+ *     summary: Parse receipt image (session creation + immediate normalized items)
+ *     tags: [Sessions]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [sessionName, language, image]
+ *             properties:
+ *               sessionName:
+ *                 type: string
+ *                 example: "Кафе на Октябрь"
+ *               language:
+ *                 type: string
+ *                 example: ru-RU
+ *               image:
+ *                 type: object
+ *                 required: [mimeType, data]
+ *                 properties:
+ *                   mimeType:
+ *                     type: string
+ *                     example: image/jpeg
+ *                   data:
+ *                     type: string
+ *                     description: Base64 image data
+ *     responses:
+ *       200:
+ *         description: Parsed receipt items
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sessionId: { type: integer }
+ *                 sessionName: { type: string }
+ *                 language: { type: string }
+ *                 items:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id: { type: string }
+ *                       name: { type: string }
+ *                       unitPrice: { type: number }
+ *                       quantity: { type: number }
+ *                       totalPrice: { type: number }
+ *                       kind: { type: string, nullable: true }
+ *                 summary:
+ *                   type: object
+ *                   properties:
+ *                     grandTotal: { type: number }
+ */
+router.post(
+  "/scan",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const { sessionName, language, image } = req.body || {};
+      if (!sessionName || typeof sessionName !== "string") {
+        return res.status(400).json({ error: "sessionName required" });
+      }
+      if (!language || typeof language !== "string") {
+        return res.status(400).json({ error: "language required" });
+      }
+      if (
+        !image ||
+        typeof image !== "object" ||
+        !image.mimeType ||
+        !image.data
+      ) {
+        return res
+          .status(400)
+          .json({ error: "image { mimeType, data } required" });
+      }
+
+      // Create session with name (image persistence / OCR not implemented yet)
+      const session = await prisma.session.create({
+        data: {
+          creatorId: req.user.id,
+          status: "ACTIVE",
+        },
+        select: { id: true },
+      });
+
+      // MOCK parse (replace with actual model inference):
+      const items = [
+        {
+          id: "1001",
+          name: "Кола 0.5L",
+          unitPrice: 2.0,
+          quantity: 6,
+          totalPrice: 12.0,
+        },
+        {
+          id: "1002",
+          name: "Кола (стакан)",
+          unitPrice: 2.5,
+          quantity: 1,
+          totalPrice: 2.5,
+        },
+        {
+          id: "FEE1",
+          name: "Сервис",
+          unitPrice: 1.2,
+          quantity: 1,
+          totalPrice: 1.2,
+          kind: "fee",
+        },
+      ];
+      const grandTotal = items.reduce((s, i) => s + i.totalPrice, 0);
+
+      return res.json({
+        sessionId: session.id,
+        sessionName,
+        language,
+        items,
+        summary: { grandTotal },
+      });
+    } catch (err) {
+      console.error("POST /sessions/scan error", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
  * tags:
  *   name: Sessions
  *   description: Receipt split sessions

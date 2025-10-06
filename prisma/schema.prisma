@@ -95,6 +95,7 @@ model Session {
   id             Int             @id @default(autoincrement())
   creatorId      Int
   groupId        Int?
+  name           String?
   receiptImageUrl String?
   serviceFee     Decimal         @default(0)
   total          Decimal         @default(0)
