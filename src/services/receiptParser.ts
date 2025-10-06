@@ -153,18 +153,9 @@ export async function parseReceipt(
       "[parseReceipt] GEMINI_API_KEY format unexpected (should usually start with 'AIza')."
     );
   }
-  let client: GoogleGenerativeAI;
-  try {
-    // @ts-ignore try constructing with apiVersion option (if supported)
-    client = new GoogleGenerativeAI(GEMINI_API_KEY, {
-      apiVersion: GEMINI_API_VERSION,
-    });
-  } catch {
-    client = new GoogleGenerativeAI(GEMINI_API_KEY);
-  }
   if (DEBUG_PARSE) {
     console.log(
-      `[parseReceipt] API version=${GEMINI_API_VERSION} model candidates=${MODEL_CANDIDATES.join(
+      `[parseReceipt] REST mode; preferred version=${GEMINI_API_VERSION}; candidates=${MODEL_CANDIDATES.join(
         ","
       )}`
     );
@@ -182,10 +173,12 @@ export async function parseReceipt(
     const start = Date.now();
     try {
       if (DEBUG_PARSE) console.log(`[parseReceipt] Trying model: ${modelName}`);
-      const model = client.getGenerativeModel({ model: modelName });
-      const result = await model.generateContent([prompt, imagePart]);
-      const response = await result.response;
-      const text = response.text();
+      const text = await generateViaRest(
+        modelName,
+        prompt,
+        imagePart.inlineData.data,
+        imagePart.inlineData.mimeType
+      );
       const parsed = safeParseJson(text);
       if (!parsed.ok || !parsed.data) {
         if (DEBUG_PARSE) {
@@ -222,4 +215,69 @@ export async function parseReceipt(
       lastError
     );
   return mockParse();
+}
+
+async function generateViaRest(
+  model: string,
+  prompt: string,
+  base64: string,
+  mime: string
+): Promise<string> {
+  const order =
+    GEMINI_API_VERSION === "v1beta" ? ["v1beta", "v1"] : ["v1", "v1beta"];
+  let lastErr: any = null;
+  for (const ver of order) {
+    const url = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${encodeURIComponent(
+      GEMINI_API_KEY as string
+    )}`;
+    const body = {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: `${prompt}\nOUTPUT ONLY RAW JSON. NO MARKDOWN.` },
+            { inlineData: { data: base64, mimeType: mime } },
+          ],
+        },
+      ],
+      generationConfig: { temperature: 0.1 },
+    };
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        if (DEBUG_PARSE)
+          console.warn(
+            `[generateViaRest] ${ver} ${model} -> HTTP ${resp.status} ${resp.statusText}`
+          );
+        lastErr = Object.assign(new Error("HTTP " + resp.status), {
+          status: resp.status,
+        });
+        continue;
+      }
+      const json = await resp.json();
+      const texts: string[] = [];
+      if (Array.isArray(json.candidates)) {
+        for (const cand of json.candidates) {
+          const parts = cand?.content?.parts || cand?.parts || [];
+          for (const p of parts) if (p.text) texts.push(p.text);
+        }
+      }
+      const combined = texts.join("\n").trim();
+      if (DEBUG_PARSE)
+        console.log(
+          `[generateViaRest] success via ${ver} model=${model} chars=${combined.length}`
+        );
+      return combined;
+    } catch (e) {
+      lastErr = e;
+      if (DEBUG_PARSE)
+        console.warn(`[generateViaRest] Error calling ${ver} ${model}:`, e);
+      continue;
+    }
+  }
+  throw lastErr || new Error("All versions failed");
 }
