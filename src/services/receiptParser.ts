@@ -27,6 +27,8 @@ export interface ParseResult {
         httpStatus?: number;
         durationMs?: number;
         chars?: number;
+        errorMessage?: string;
+        errorCode?: string;
       }>
     | undefined;
 }
@@ -271,6 +273,8 @@ export async function parseReceipt(
         status: status ? "http_error" : "exception",
         httpStatus: status,
         durationMs: Date.now() - start,
+        errorMessage: err?.apiError?.message || err?.message,
+        errorCode: err?.apiError?.code,
       });
       // For 404 continue; for 403/429 also continue to allow a fallback.
       continue;
@@ -318,13 +322,42 @@ async function generateViaRest(
         body: JSON.stringify(body),
       });
       if (!resp.ok) {
-        if (DEBUG_PARSE)
+        let errorPayload: any = undefined;
+        try {
+          const txt = await resp.text();
+          // Attempt JSON parse; Google errors are JSON: { error: { code, message, status } }
+          if (txt) {
+            try {
+              const parsed = JSON.parse(txt);
+              errorPayload = parsed.error || parsed;
+            } catch {
+              errorPayload = { raw: txt.slice(0, 500) };
+            }
+          }
+        } catch {
+          /* ignore body read errors */
+        }
+        if (DEBUG_PARSE) {
+          const code = errorPayload?.code || resp.status;
+          const msg = errorPayload?.message || resp.statusText;
           console.warn(
-            `[generateViaRest] ${ver} ${model} -> HTTP ${resp.status} ${resp.statusText}`
+            `[generateViaRest] ${ver} ${model} -> HTTP ${resp.status} (${code}) ${msg}`
           );
-        lastErr = Object.assign(new Error("HTTP " + resp.status), {
-          status: resp.status,
-        });
+          if (errorPayload?.status && errorPayload?.status !== code) {
+            console.warn(
+              `[generateViaRest] API error status field: ${errorPayload.status}`
+            );
+          }
+        }
+        lastErr = Object.assign(
+          new Error(
+            `HTTP ${resp.status} ${errorPayload?.message || resp.statusText}`
+          ),
+          {
+            status: resp.status,
+            apiError: errorPayload,
+          }
+        );
         continue;
       }
       const json = await resp.json();

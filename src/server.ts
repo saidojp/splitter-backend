@@ -12,6 +12,7 @@ import sessionsRoutes from "./routes/sessions.js";
 import usersRoutes from "./routes/users.js";
 import uploadsRoutes from "./routes/uploads.js";
 import { logAuthAttempts } from "./middleware/logAuth.js";
+import debugRoutes from "./routes/debug.js";
 
 // Load .env
 dotenv.config();
@@ -85,6 +86,7 @@ app.use("/groups", groupsRoutes);
 app.use("/sessions", sessionsRoutes);
 app.use("/users", usersRoutes);
 app.use("/uploads", uploadsRoutes);
+app.use("/debug", debugRoutes);
 
 // Health check
 app.get("/health", (req, res) => {
