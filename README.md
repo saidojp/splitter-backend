@@ -48,6 +48,10 @@ Receipt parsing (Gemini) optional:
 - `GEMINI_MODEL_PARSE` — model name (default `gemini-1.5-flash`)
 - `DEBUG_PARSE=1` — include raw model text & timing in response under `_debug`
 
+Body size tuning:
+
+- `JSON_BODY_LIMIT` — override JSON request body limit (default `4mb`) for large base64 images in `/sessions/scan`
+
 R2/Uploads (optional, for server-side avatar upload):
 
 - `R2_ENDPOINT` — e.g. https://<accountid>.r2.cloudflarestorage.com
