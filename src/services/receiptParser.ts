@@ -30,6 +30,20 @@ export interface ParseOptions {
 // Environment-driven configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL_PARSE = process.env.GEMINI_MODEL_PARSE || "gemini-1.5-flash";
+const GEMINI_MODEL_FALLBACKS = (process.env.GEMINI_MODEL_FALLBACKS || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+const MODEL_CANDIDATES = Array.from(
+  new Set([
+    GEMINI_MODEL_PARSE,
+    ...GEMINI_MODEL_FALLBACKS,
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-flash-001",
+    "gemini-1.5-pro",
+    "gemini-1.5-pro-latest",
+  ])
+);
 const DEBUG_PARSE = process.env.DEBUG_PARSE === "1";
 
 // Extraction JSON schema instruction (lightweight, we rely on LLM following examples)
@@ -126,47 +140,59 @@ export async function parseReceipt(
       console.warn("[parseReceipt] Using mock: GEMINI_API_KEY not set");
     return mockParse();
   }
-  try {
-    const client = new GoogleGenerativeAI(GEMINI_API_KEY);
-    const model = client.getGenerativeModel({ model: GEMINI_MODEL_PARSE });
+
+  const client = new GoogleGenerativeAI(GEMINI_API_KEY);
+  const prompt = `${EXTRACTION_INSTRUCTIONS}\nLanguage context of receipt: ${options.language}\nSession Name: ${options.sessionName}`;
+  const imagePart = {
+    inlineData: {
+      data: options.imageBase64,
+      mimeType: options.mimeType,
+    },
+  } as const;
+
+  let lastError: unknown = null;
+  for (const modelName of MODEL_CANDIDATES) {
     const start = Date.now();
-
-    const prompt = `${EXTRACTION_INSTRUCTIONS}\nLanguage context of receipt: ${options.language}\nSession Name: ${options.sessionName}`;
-
-    const imagePart = {
-      inlineData: {
-        data: options.imageBase64,
-        mimeType: options.mimeType,
-      },
-    } as const;
-
-    const result = await model.generateContent([prompt, imagePart]);
-    const response = await result.response;
-    const text = response.text();
-
-    const parsed = safeParseJson(text);
-    if (!parsed.ok || !parsed.data) {
-      if (DEBUG_PARSE) {
-        console.warn(
-          "[parseReceipt] Gemini response did not parse as valid JSON, falling back to mock. Raw snippet:",
-          text.slice(0, 300)
-        );
+    try {
+      if (DEBUG_PARSE) console.log(`[parseReceipt] Trying model: ${modelName}`);
+      const model = client.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent([prompt, imagePart]);
+      const response = await result.response;
+      const text = response.text();
+      const parsed = safeParseJson(text);
+      if (!parsed.ok || !parsed.data) {
+        if (DEBUG_PARSE) {
+          console.warn(
+            `[parseReceipt] Model ${modelName} returned non-parseable JSON, length=${text.length}. Snippet=`,
+            text.slice(0, 280)
+          );
+        }
+        continue; // try next model
       }
+      const durationMs = Date.now() - start;
       return {
-        ...mockParse(),
+        ...parsed.data,
+        model: modelName,
+        durationMs,
         rawModelText: DEBUG_PARSE ? text : undefined,
       } as ParseResult;
+    } catch (err: any) {
+      lastError = err;
+      const status = err?.status || err?.statusCode;
+      if (DEBUG_PARSE)
+        console.warn(
+          `[parseReceipt] Error with model ${modelName} (status=${status}) → ${
+            err?.message || err
+          }`
+        );
+      // For 404 continue; for 403/429 also continue to allow a fallback.
+      continue;
     }
-    const durationMs = Date.now() - start;
-    return {
-      ...parsed.data,
-      model: GEMINI_MODEL_PARSE,
-      durationMs,
-      rawModelText: DEBUG_PARSE ? text : undefined,
-    } as ParseResult;
-  } catch (err) {
-    if (DEBUG_PARSE)
-      console.error("[parseReceipt] Gemini error, using mock:", err);
-    return mockParse();
   }
+  if (DEBUG_PARSE)
+    console.error(
+      "[parseReceipt] All model attempts failed, returning mock. Last error:",
+      lastError
+    );
+  return mockParse();
 }
