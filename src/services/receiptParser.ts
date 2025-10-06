@@ -122,6 +122,8 @@ export async function parseReceipt(
   options: ParseOptions
 ): Promise<ParseResult> {
   if (!GEMINI_API_KEY) {
+    if (DEBUG_PARSE)
+      console.warn("[parseReceipt] Using mock: GEMINI_API_KEY not set");
     return mockParse();
   }
   try {
@@ -144,6 +146,12 @@ export async function parseReceipt(
 
     const parsed = safeParseJson(text);
     if (!parsed.ok || !parsed.data) {
+      if (DEBUG_PARSE) {
+        console.warn(
+          "[parseReceipt] Gemini response did not parse as valid JSON, falling back to mock. Raw snippet:",
+          text.slice(0, 300)
+        );
+      }
       return {
         ...mockParse(),
         rawModelText: DEBUG_PARSE ? text : undefined,
@@ -157,7 +165,8 @@ export async function parseReceipt(
       rawModelText: DEBUG_PARSE ? text : undefined,
     } as ParseResult;
   } catch (err) {
-    if (DEBUG_PARSE) console.error("Gemini parse error", err);
+    if (DEBUG_PARSE)
+      console.error("[parseReceipt] Gemini error, using mock:", err);
     return mockParse();
   }
 }

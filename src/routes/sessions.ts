@@ -111,6 +111,7 @@ router.post(
         language,
         items: parseResult.items,
         summary: parseResult.summary,
+        source: parseResult.source,
         ...(process.env.DEBUG_PARSE === "1" && parseResult.rawModelText
           ? {
               _debug: {
