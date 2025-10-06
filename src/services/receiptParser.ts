@@ -29,6 +29,7 @@ export interface ParseOptions {
 
 // Environment-driven configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || "v1";
 const GEMINI_MODEL_PARSE = process.env.GEMINI_MODEL_PARSE || "gemini-1.5-flash";
 const GEMINI_MODEL_FALLBACKS = (process.env.GEMINI_MODEL_FALLBACKS || "")
   .split(",")
@@ -38,10 +39,16 @@ const MODEL_CANDIDATES = Array.from(
   new Set([
     GEMINI_MODEL_PARSE,
     ...GEMINI_MODEL_FALLBACKS,
+    // existing fallbacks
     "gemini-1.5-flash-latest",
     "gemini-1.5-flash-001",
     "gemini-1.5-pro",
     "gemini-1.5-pro-latest",
+    // legacy / vision capable older names that might still be enabled
+    "gemini-pro-vision",
+    "gemini-1.0-pro-vision-latest",
+    "gemini-pro",
+    "gemini-1.0-pro-latest",
   ])
 );
 const DEBUG_PARSE = process.env.DEBUG_PARSE === "1";
@@ -141,7 +148,27 @@ export async function parseReceipt(
     return mockParse();
   }
 
-  const client = new GoogleGenerativeAI(GEMINI_API_KEY);
+  if (DEBUG_PARSE && !/^AIza[0-9A-Za-z_-]{10,}$/.test(GEMINI_API_KEY)) {
+    console.warn(
+      "[parseReceipt] GEMINI_API_KEY format unexpected (should usually start with 'AIza')."
+    );
+  }
+  let client: GoogleGenerativeAI;
+  try {
+    // @ts-ignore try constructing with apiVersion option (if supported)
+    client = new GoogleGenerativeAI(GEMINI_API_KEY, {
+      apiVersion: GEMINI_API_VERSION,
+    });
+  } catch {
+    client = new GoogleGenerativeAI(GEMINI_API_KEY);
+  }
+  if (DEBUG_PARSE) {
+    console.log(
+      `[parseReceipt] API version=${GEMINI_API_VERSION} model candidates=${MODEL_CANDIDATES.join(
+        ","
+      )}`
+    );
+  }
   const prompt = `${EXTRACTION_INSTRUCTIONS}\nLanguage context of receipt: ${options.language}\nSession Name: ${options.sessionName}`;
   const imagePart = {
     inlineData: {
