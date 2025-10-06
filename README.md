@@ -42,6 +42,12 @@ Env variables (minimum):
 - `DEBUG_AUTH=1` — verbose JWT verification logs
 - `DEFAULT_AVATAR_URL` — fallback avatar URL (optional)
 
+Receipt parsing (Gemini) optional:
+
+- `GEMINI_API_KEY` — enables real receipt parsing (without it, server returns deterministic mock items)
+- `GEMINI_MODEL_PARSE` — model name (default `gemini-1.5-flash`)
+- `DEBUG_PARSE=1` — include raw model text & timing in response under `_debug`
+
 R2/Uploads (optional, for server-side avatar upload):
 
 - `R2_ENDPOINT` — e.g. https://<accountid>.r2.cloudflarestorage.com

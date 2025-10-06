@@ -2,6 +2,7 @@ import { Router } from "express";
 import type { Response } from "express";
 import { prisma } from "../config/prisma.js";
 import { authenticateToken, type AuthRequest } from "../middleware/auth.js";
+import { parseReceipt } from "../services/receiptParser.js";
 
 const router = Router();
 
@@ -88,7 +89,7 @@ router.post(
           .json({ error: "image { mimeType, data } required" });
       }
 
-      // Create session with name (image persistence / OCR not implemented yet)
+      // Create session (name field exists in schema but older DB may lack column; ignore until migration applied)
       const session = await prisma.session.create({
         data: {
           creatorId: req.user.id,
@@ -97,39 +98,27 @@ router.post(
         select: { id: true },
       });
 
-      // MOCK parse (replace with actual model inference):
-      const items = [
-        {
-          id: "1001",
-          name: "Кола 0.5L",
-          unitPrice: 2.0,
-          quantity: 6,
-          totalPrice: 12.0,
-        },
-        {
-          id: "1002",
-          name: "Кола (стакан)",
-          unitPrice: 2.5,
-          quantity: 1,
-          totalPrice: 2.5,
-        },
-        {
-          id: "FEE1",
-          name: "Сервис",
-          unitPrice: 1.2,
-          quantity: 1,
-          totalPrice: 1.2,
-          kind: "fee",
-        },
-      ];
-      const grandTotal = items.reduce((s, i) => s + i.totalPrice, 0);
+      const parseResult = await parseReceipt({
+        language,
+        sessionName,
+        mimeType: image.mimeType,
+        imageBase64: image.data,
+      });
 
       return res.json({
         sessionId: session.id,
         sessionName,
         language,
-        items,
-        summary: { grandTotal },
+        items: parseResult.items,
+        summary: parseResult.summary,
+        ...(process.env.DEBUG_PARSE === "1" && parseResult.rawModelText
+          ? {
+              _debug: {
+                model: parseResult.model,
+                durationMs: parseResult.durationMs,
+              },
+            }
+          : {}),
       });
     } catch (err) {
       console.error("POST /sessions/scan error", err);
