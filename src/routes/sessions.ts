@@ -117,6 +117,9 @@ router.post(
               _debug: {
                 model: parseResult.model,
                 durationMs: parseResult.durationMs,
+                usedModelVersion: parseResult.usedModelVersion,
+                modelsTried: parseResult.modelsTried,
+                raw: parseResult.rawModelText,
               },
             }
           : {}),

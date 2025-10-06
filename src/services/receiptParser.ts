@@ -18,6 +18,17 @@ export interface ParseResult {
   model?: string | undefined; // which model was used
   durationMs?: number | undefined;
   source: "gemini" | "mock";
+  usedModelVersion?: string | undefined;
+  modelsTried?:
+    | Array<{
+        model: string;
+        version: string;
+        status: string;
+        httpStatus?: number;
+        durationMs?: number;
+        chars?: number;
+      }>
+    | undefined;
 }
 
 export interface ParseOptions {
@@ -52,6 +63,8 @@ const MODEL_CANDIDATES = Array.from(
   ])
 );
 const DEBUG_PARSE = process.env.DEBUG_PARSE === "1";
+let cachedModel: { model: string; version: string } | null = null;
+let lastUsedVersion: string | undefined;
 
 // Extraction JSON schema instruction (lightweight, we rely on LLM following examples)
 const EXTRACTION_INSTRUCTIONS = `You are a receipt parser. Return ONLY valid JSON with this shape:
@@ -72,10 +85,11 @@ Rules:
 
 function safeParseJson(text: string): { ok: boolean; data?: ParseResult } {
   try {
-    const firstBrace = text.indexOf("{");
-    const lastBrace = text.lastIndexOf("}");
+    const cleaned = unwrapMarkdown(text);
+    const firstBrace = cleaned.indexOf("{");
+    const lastBrace = cleaned.lastIndexOf("}");
     if (firstBrace === -1 || lastBrace === -1) return { ok: false };
-    const jsonSlice = text.slice(firstBrace, lastBrace + 1);
+    const jsonSlice = cleaned.slice(firstBrace, lastBrace + 1);
     const raw = JSON.parse(jsonSlice);
     if (!raw || typeof raw !== "object") return { ok: false };
     if (!Array.isArray(raw.items) || !raw.summary) return { ok: false };
@@ -103,6 +117,12 @@ function safeParseJson(text: string): { ok: boolean; data?: ParseResult } {
   } catch {
     return { ok: false };
   }
+}
+
+function unwrapMarkdown(t: string): string {
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence && typeof fence[1] === "string") return fence[1].trim();
+  return t.trim();
 }
 
 function round2(n: number) {
@@ -153,11 +173,17 @@ export async function parseReceipt(
       "[parseReceipt] GEMINI_API_KEY format unexpected (should usually start with 'AIza')."
     );
   }
+  const dynamicCandidates = cachedModel
+    ? [
+        cachedModel.model,
+        ...MODEL_CANDIDATES.filter((m) => m !== cachedModel!.model),
+      ]
+    : MODEL_CANDIDATES.slice();
   if (DEBUG_PARSE) {
     console.log(
-      `[parseReceipt] REST mode; preferred version=${GEMINI_API_VERSION}; candidates=${MODEL_CANDIDATES.join(
-        ","
-      )}`
+      `[parseReceipt] REST mode; preferred version=${GEMINI_API_VERSION}; cached=${
+        cachedModel ? cachedModel.model + "@" + cachedModel.version : "none"
+      }; candidates=${dynamicCandidates.join(",")}`
     );
   }
   const prompt = `${EXTRACTION_INSTRUCTIONS}\nLanguage context of receipt: ${options.language}\nSession Name: ${options.sessionName}`;
@@ -169,7 +195,8 @@ export async function parseReceipt(
   } as const;
 
   let lastError: unknown = null;
-  for (const modelName of MODEL_CANDIDATES) {
+  const modelsTried: NonNullable<ParseResult["modelsTried"]> = [];
+  for (const modelName of dynamicCandidates) {
     const start = Date.now();
     try {
       if (DEBUG_PARSE) console.log(`[parseReceipt] Trying model: ${modelName}`);
@@ -187,15 +214,48 @@ export async function parseReceipt(
             text.slice(0, 280)
           );
         }
+        modelsTried.push({
+          model: modelName,
+          version: lastUsedVersion || "?",
+          status: "parse_fail",
+          durationMs: Date.now() - start,
+          chars: text.length,
+        });
         continue; // try next model
       }
       const durationMs = Date.now() - start;
-      return {
+      const truncated = DEBUG_PARSE
+        ? text.length > 4000
+          ? text.slice(0, 4000) + `\n/* trimmed ${text.length - 4000} chars */`
+          : text
+        : undefined;
+      const result: ParseResult = {
         ...parsed.data,
         model: modelName,
         durationMs,
-        rawModelText: DEBUG_PARSE ? text : undefined,
-      } as ParseResult;
+        rawModelText: truncated,
+        usedModelVersion: lastUsedVersion,
+        modelsTried: DEBUG_PARSE
+          ? [
+              ...modelsTried,
+              {
+                model: modelName,
+                version: lastUsedVersion || "?",
+                status: "ok",
+                durationMs,
+                chars: text.length,
+              },
+            ]
+          : undefined,
+      };
+      if (!cachedModel) {
+        cachedModel = { model: modelName, version: lastUsedVersion || "v1" };
+        if (DEBUG_PARSE)
+          console.log(
+            `[parseReceipt] Caching model ${cachedModel.model}@${cachedModel.version}`
+          );
+      }
+      return result;
     } catch (err: any) {
       lastError = err;
       const status = err?.status || err?.statusCode;
@@ -205,6 +265,13 @@ export async function parseReceipt(
             err?.message || err
           }`
         );
+      modelsTried.push({
+        model: modelName,
+        version: lastUsedVersion || "?",
+        status: status ? "http_error" : "exception",
+        httpStatus: status,
+        durationMs: Date.now() - start,
+      });
       // For 404 continue; for 403/429 also continue to allow a fallback.
       continue;
     }
@@ -214,7 +281,9 @@ export async function parseReceipt(
       "[parseReceipt] All model attempts failed, returning mock. Last error:",
       lastError
     );
-  return mockParse();
+  const fallback = mockParse();
+  if (DEBUG_PARSE) fallback.modelsTried = modelsTried;
+  return fallback;
 }
 
 async function generateViaRest(
