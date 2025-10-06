@@ -3,64 +3,76 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 
 /** Shape returned to the route */
 export interface ParsedReceiptItem {
-  id: string;
+  id: string; // stable within this response (not DB id)
   name: string;
   unitPrice: number;
   quantity: number;
-  totalPrice: number;
-  kind?: string | null;
+  totalPrice: number; // unitPrice * quantity (model can supply; we'll verify)
+  kind?: string | null; // e.g. fee/tip/discount
 }
 
 export interface ParseResult {
   items: ParsedReceiptItem[];
   summary: { grandTotal: number };
-  rawModelText?: string;
-  model?: string;
-  durationMs?: number;
+  rawModelText?: string | undefined; // for debugging (only when DEBUG_PARSE=1)
+  model?: string | undefined; // which model was used
+  durationMs?: number | undefined;
   source: "gemini" | "mock";
-  usedModelVersion?: string;
-  modelsTried?: Array<{
-    model: string;
-    version: string;
-    status: string;
-    httpStatus?: number;
-    durationMs?: number;
-    chars?: number;
-    errorMessage?: string;
-    errorCode?: string;
-  }>;
+  usedModelVersion?: string | undefined;
+  modelsTried?:
+    | Array<{
+        model: string;
+        version: string;
+        status: string;
+        httpStatus?: number;
+        durationMs?: number;
+        chars?: number;
+        errorMessage?: string;
+        errorCode?: string;
+      }>
+    | undefined;
 }
 
 export interface ParseOptions {
-  language: string;
+  language: string; // BCP-47 like ru-RU, en-US
   sessionName: string;
   mimeType: string;
-  imageBase64: string;
+  imageBase64: string; // no data: prefix, raw base64
 }
 
-// --- Configuration ---
+// Environment-driven configuration
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_MODEL_PARSE = process.env.GEMINI_MODEL_PARSE || "gemini-1.5-flash";
+const GEMINI_API_VERSION = process.env.GEMINI_API_VERSION || "v1";
+const GEMINI_MODEL_PARSE = process.env.GEMINI_MODEL_PARSE || "gemini-2.5-flash";
 const GEMINI_MODEL_FALLBACKS = (process.env.GEMINI_MODEL_FALLBACKS || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 
+// ✅ обновлённые кандидаты на основе актуальных моделей (октябрь 2025)
 const MODEL_CANDIDATES = Array.from(
   new Set([
     GEMINI_MODEL_PARSE,
     ...GEMINI_MODEL_FALLBACKS,
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-flash-001",
+    // current primary & secondary models
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.5-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-001",
+    "gemini-2.0-flash-lite",
+    "gemini-2.0-flash-lite-001",
+    // fallback older generation still supported in some regions
     "gemini-1.5-pro",
-    "gemini-1.5-pro-latest",
+    "gemini-1.5-flash",
   ])
 );
 
 const DEBUG_PARSE = process.env.DEBUG_PARSE === "1";
 let cachedModel: { model: string; version: string } | null = null;
+let lastUsedVersion: string | undefined;
 
-// --- Parsing instruction ---
+// Extraction JSON schema instruction (lightweight, we rely on LLM following examples)
 const EXTRACTION_INSTRUCTIONS = `You are a receipt parser. Return ONLY valid JSON with this shape:
 {
   "items": [
@@ -70,14 +82,13 @@ const EXTRACTION_INSTRUCTIONS = `You are a receipt parser. Return ONLY valid JSO
 }
 Rules:
 - Numbers must use dot as decimal separator.
-- id: generate short stable IDs like "1", "2"... or semantic unique IDs.
+- id: generate short stable IDs like "1", "2"... or semantic (e.g. FEE1) unique within list.
 - quantity >= 1.
 - totalPrice = unitPrice * quantity (round to 2 decimals).
 - Include service/tips/fees as separate items with kind set.
-- Ignore currency symbols.
-- grandTotal = sum of totalPrice values.`;
+- If currency symbol present ignore it (store numeric only).
+- grandTotal = sum of item totalPrice values (after any discounts).`;
 
-// --- Helpers ---
 function safeParseJson(text: string): { ok: boolean; data?: ParseResult } {
   try {
     const cleaned = unwrapMarkdown(text);
@@ -88,7 +99,7 @@ function safeParseJson(text: string): { ok: boolean; data?: ParseResult } {
     const raw = JSON.parse(jsonSlice);
     if (!raw || typeof raw !== "object") return { ok: false };
     if (!Array.isArray(raw.items) || !raw.summary) return { ok: false };
-
+    // Basic normalization
     const items: ParsedReceiptItem[] = raw.items.map((it: any, idx: number) => {
       const q = Number(it.quantity ?? 1) || 1;
       const unit = Number(it.unitPrice ?? it.price ?? 0) || 0;
@@ -102,13 +113,12 @@ function safeParseJson(text: string): { ok: boolean; data?: ParseResult } {
         kind: it.kind ? String(it.kind) : undefined,
       };
     });
-
     const grandTotal = round2(
-      items.reduce((s, i) => s + (i.totalPrice || 0), 0)
+      items.reduce((s, i) => s + (Number(i.totalPrice) || 0), 0)
     );
     return {
       ok: true,
-      data: { items, summary: { grandTotal }, source: "gemini" },
+      data: { items, summary: { grandTotal }, source: "gemini" } as ParseResult,
     };
   } catch {
     return { ok: false };
@@ -117,21 +127,23 @@ function safeParseJson(text: string): { ok: boolean; data?: ParseResult } {
 
 function unwrapMarkdown(t: string): string {
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  return fence && fence[1] ? fence[1].trim() : t.trim();
+  if (fence && typeof fence[1] === "string") return fence[1].trim();
+  return t.trim();
 }
 
 function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+/** Fallback deterministic mock when API key missing or parse fails */
 function mockParse(): ParseResult {
   const items: ParsedReceiptItem[] = [
     {
       id: "1001",
       name: "Кола 0.5L",
-      unitPrice: 2,
+      unitPrice: 2.0,
       quantity: 6,
-      totalPrice: 12,
+      totalPrice: 12.0,
     },
     {
       id: "1002",
@@ -153,123 +165,220 @@ function mockParse(): ParseResult {
   return { items, summary: { grandTotal }, source: "mock" };
 }
 
-// --- Main function ---
 export async function parseReceipt(
   options: ParseOptions
 ): Promise<ParseResult> {
   if (!GEMINI_API_KEY) {
     if (DEBUG_PARSE)
-      console.warn("[parseReceipt] Missing GEMINI_API_KEY, using mock");
+      console.warn("[parseReceipt] Using mock: GEMINI_API_KEY not set");
     return mockParse();
   }
 
-  if (!/^AIza[0-9A-Za-z_-]{10,}$/.test(GEMINI_API_KEY)) {
+  if (DEBUG_PARSE && !/^AIza[0-9A-Za-z_-]{10,}$/.test(GEMINI_API_KEY)) {
     console.warn(
-      "[parseReceipt] Warning: GEMINI_API_KEY format unexpected (should start with 'AIza')"
+      "[parseReceipt] GEMINI_API_KEY format unexpected (should usually start with 'AIza')."
     );
   }
+  const dynamicCandidates = cachedModel
+    ? [
+        cachedModel.model,
+        ...MODEL_CANDIDATES.filter((m) => m !== cachedModel!.model),
+      ]
+    : MODEL_CANDIDATES.slice();
+  if (DEBUG_PARSE) {
+    console.log(
+      `[parseReceipt] REST mode; preferred version=${GEMINI_API_VERSION}; cached=${
+        cachedModel ? cachedModel.model + "@" + cachedModel.version : "none"
+      }; candidates=${dynamicCandidates.join(",")}`
+    );
+  }
+  const prompt = `${EXTRACTION_INSTRUCTIONS}\nLanguage context of receipt: ${options.language}\nSession Name: ${options.sessionName}`;
+  const imagePart = {
+    inlineData: {
+      data: options.imageBase64,
+      mimeType: options.mimeType,
+    },
+  } as const;
 
-  const prompt = `${EXTRACTION_INSTRUCTIONS}\nLanguage: ${options.language}\nSession: ${options.sessionName}`;
-  const imagePart = { data: options.imageBase64, mimeType: options.mimeType };
+  let lastError: unknown = null;
   const modelsTried: NonNullable<ParseResult["modelsTried"]> = [];
-
-  for (const modelName of MODEL_CANDIDATES) {
+  for (const modelName of dynamicCandidates) {
     const start = Date.now();
     try {
       if (DEBUG_PARSE) console.log(`[parseReceipt] Trying model: ${modelName}`);
       const text = await generateViaRest(
         modelName,
         prompt,
-        imagePart.data,
-        imagePart.mimeType
+        imagePart.inlineData.data,
+        imagePart.inlineData.mimeType
       );
       const parsed = safeParseJson(text);
-
-      if (parsed.ok && parsed.data) {
-        const duration = Date.now() - start;
-        return {
-          ...parsed.data,
+      if (!parsed.ok || !parsed.data) {
+        if (DEBUG_PARSE) {
+          console.warn(
+            `[parseReceipt] Model ${modelName} returned non-parseable JSON, length=${text.length}. Snippet=`,
+            text.slice(0, 280)
+          );
+        }
+        modelsTried.push({
           model: modelName,
-          durationMs: duration,
-          usedModelVersion: "v1",
-          modelsTried,
-        };
+          version: lastUsedVersion || "?",
+          status: "parse_fail",
+          durationMs: Date.now() - start,
+          chars: text.length,
+        });
+        continue; // try next model
       }
-
-      modelsTried.push({
+      const durationMs = Date.now() - start;
+      const truncated = DEBUG_PARSE
+        ? text.length > 4000
+          ? text.slice(0, 4000) + `\n/* trimmed ${text.length - 4000} chars */`
+          : text
+        : undefined;
+      const result: ParseResult = {
+        ...parsed.data,
         model: modelName,
-        version: "v1",
-        status: "parse_fail",
-      });
+        durationMs,
+        rawModelText: truncated,
+        usedModelVersion: lastUsedVersion,
+        modelsTried: DEBUG_PARSE
+          ? [
+              ...modelsTried,
+              {
+                model: modelName,
+                version: lastUsedVersion || "?",
+                status: "ok",
+                durationMs,
+                chars: text.length,
+              },
+            ]
+          : undefined,
+      };
+      if (!cachedModel) {
+        cachedModel = { model: modelName, version: lastUsedVersion || "v1" };
+        if (DEBUG_PARSE)
+          console.log(
+            `[parseReceipt] Caching model ${cachedModel.model}@${cachedModel.version}`
+          );
+      }
+      return result;
     } catch (err: any) {
-      const httpStatus = err?.status || err?.statusCode;
+      lastError = err;
+      const status = err?.status || err?.statusCode;
+      if (DEBUG_PARSE)
+        console.warn(
+          `[parseReceipt] Error with model ${modelName} (status=${status}) → ${
+            err?.message || err
+          }`
+        );
       modelsTried.push({
         model: modelName,
-        version: "v1",
-        status: "http_error",
-        httpStatus,
-        errorMessage: err?.message,
+        version: lastUsedVersion || "?",
+        status: status ? "http_error" : "exception",
+        httpStatus: status,
+        durationMs: Date.now() - start,
+        errorMessage: err?.apiError?.message || err?.message,
+        errorCode: err?.apiError?.code,
       });
-      if (DEBUG_PARSE)
-        console.warn(`[parseReceipt] Error with ${modelName}: ${err.message}`);
       continue;
     }
   }
-
-  console.error("[parseReceipt] All Gemini models failed, using mock");
-  return mockParse();
+  if (DEBUG_PARSE)
+    console.error(
+      "[parseReceipt] All model attempts failed, returning mock. Last error:",
+      lastError
+    );
+  const fallback = mockParse();
+  if (DEBUG_PARSE) fallback.modelsTried = modelsTried;
+  return fallback;
 }
 
-// --- Actual Gemini API call ---
 async function generateViaRest(
   model: string,
   prompt: string,
   base64: string,
   mime: string
 ): Promise<string> {
-  const url = `https://generativelanguage.googleapis.com/v1/models/${model}:generateContent?key=${encodeURIComponent(
-    GEMINI_API_KEY as string
-  )}`;
-  const body = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: `${prompt}\nOUTPUT ONLY RAW JSON. NO MARKDOWN.` },
-          { inlineData: { data: base64, mimeType: mime } },
-        ],
-      },
-    ],
-    generationConfig: { temperature: 0.1 },
-  };
-
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!resp.ok) {
-    const txt = await resp.text();
-    let error: any = txt;
+  const order = ["v1"]; // 🔧 always use v1, no v1beta anymore
+  let lastErr: any = null;
+  for (const ver of order) {
+    const url = `https://generativelanguage.googleapis.com/${ver}/models/${model}:generateContent?key=${encodeURIComponent(
+      GEMINI_API_KEY as string
+    )}`;
+    const body = {
+      contents: [
+        {
+          role: "user",
+          parts: [
+            { text: `${prompt}\nOUTPUT ONLY RAW JSON. NO MARKDOWN.` },
+            { inlineData: { data: base64, mimeType: mime } },
+          ],
+        },
+      ],
+      generationConfig: { temperature: 0.1 },
+    };
     try {
-      const parsed = JSON.parse(txt);
-      error = parsed.error || parsed;
-    } catch {}
-    throw Object.assign(new Error(error?.message || `HTTP ${resp.status}`), {
-      status: resp.status,
-      apiError: error,
-    });
-  }
-
-  const json = await resp.json();
-  const texts: string[] = [];
-  if (Array.isArray(json.candidates)) {
-    for (const cand of json.candidates) {
-      const parts = cand?.content?.parts || cand?.parts || [];
-      for (const p of parts) if (p.text) texts.push(p.text);
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!resp.ok) {
+        let errorPayload: any = undefined;
+        try {
+          const txt = await resp.text();
+          if (txt) {
+            try {
+              const parsed = JSON.parse(txt);
+              errorPayload = parsed.error || parsed;
+            } catch {
+              errorPayload = { raw: txt.slice(0, 500) };
+            }
+          }
+        } catch {}
+        if (DEBUG_PARSE) {
+          const code = errorPayload?.code || resp.status;
+          const msg = errorPayload?.message || resp.statusText;
+          console.warn(
+            `[generateViaRest] ${ver} ${model} -> HTTP ${resp.status} (${code}) ${msg}`
+          );
+          if (errorPayload?.status && errorPayload?.status !== code) {
+            console.warn(
+              `[generateViaRest] API error status field: ${errorPayload.status}`
+            );
+          }
+        }
+        lastErr = Object.assign(
+          new Error(
+            `HTTP ${resp.status} ${errorPayload?.message || resp.statusText}`
+          ),
+          {
+            status: resp.status,
+            apiError: errorPayload,
+          }
+        );
+        continue;
+      }
+      const json = await resp.json();
+      const texts: string[] = [];
+      if (Array.isArray(json.candidates)) {
+        for (const cand of json.candidates) {
+          const parts = cand?.content?.parts || cand?.parts || [];
+          for (const p of parts) if (p.text) texts.push(p.text);
+        }
+      }
+      const combined = texts.join("\n").trim();
+      if (DEBUG_PARSE)
+        console.log(
+          `[generateViaRest] success via ${ver} model=${model} chars=${combined.length}`
+        );
+      return combined;
+    } catch (e) {
+      lastErr = e;
+      if (DEBUG_PARSE)
+        console.warn(`[generateViaRest] Error calling ${ver} ${model}:`, e);
+      continue;
     }
   }
-
-  return texts.join("\n").trim();
+  throw lastErr || new Error("All versions failed");
 }
