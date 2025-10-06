@@ -378,10 +378,12 @@ router.post(
       interface ItemInput {
         id: string;
         name: string;
-        price: number;
+        price?: number;
+        unitPrice?: number;
+        totalPrice?: number;
         quantity: number;
         kind?: string;
-        splitMode: "equal" | "count";
+        splitMode?: "equal" | "count";
         perPersonCount?: Record<string, number>;
         assignedTo?: string[];
       }
@@ -394,17 +396,44 @@ router.post(
 
       const allocs: any[] = [];
       const byParticipantTotals = new Map<string, number>();
-      const byItem: { itemId: string; name: string; total: number }[] = [];
+      const byItem: Array<{
+        itemId: string;
+        name: string;
+        total: number;
+        kind?: string | undefined;
+      }> = [];
 
       function round2(n: number) {
         return Math.round(n * 100) / 100;
       }
 
+      if (process.env.DEBUG_PARSE === "1") {
+        console.log(
+          "[finalize] participants=",
+          pList.length,
+          "items=",
+          items.length
+        );
+      }
+
       for (const raw of items as ItemInput[]) {
         if (!raw || typeof raw !== "object") continue;
-        const { id, name, price, quantity, splitMode } = raw;
-        const unitPrice = Number(price);
+        const { id, name, quantity } = raw;
+        // prefer explicit price/unitPrice; else derive from totalPrice/quantity
+        let unitPrice = Number(
+          raw.price ??
+            raw.unitPrice ??
+            (raw.totalPrice && quantity
+              ? Number(raw.totalPrice) / Number(quantity)
+              : NaN)
+        );
         const qty = Number(quantity);
+        // infer splitMode if missing
+        let splitMode: "equal" | "count" | undefined = raw.splitMode;
+        if (!splitMode) {
+          if (raw.perPersonCount) splitMode = "count";
+          else splitMode = "equal";
+        }
         if (
           !id ||
           !name ||
@@ -416,8 +445,18 @@ router.post(
             .status(400)
             .json({ error: `Invalid item fields for id=${id}` });
         }
-        const itemTotal = round2(unitPrice * qty);
-        byItem.push({ itemId: id, name, total: itemTotal });
+        const itemTotal = round2(
+          Number(
+            raw.totalPrice != null && Number.isFinite(Number(raw.totalPrice))
+              ? raw.totalPrice
+              : unitPrice * qty
+          )
+        );
+        if (raw.kind != null) {
+          byItem.push({ itemId: id, name, total: itemTotal, kind: raw.kind });
+        } else {
+          byItem.push({ itemId: id, name, total: itemTotal });
+        }
 
         if (splitMode === "count") {
           const counts = raw.perPersonCount || {};
@@ -425,11 +464,9 @@ router.post(
           let sumUnits = 0;
           for (const [pid, units] of Object.entries(counts)) {
             if (!participantIndex.has(pid)) {
-              return res
-                .status(400)
-                .json({
-                  error: `Unknown participant in perPersonCount: ${pid}`,
-                });
+              return res.status(400).json({
+                error: `Unknown participant in perPersonCount: ${pid}`,
+              });
             }
             const u = Number(units) || 0;
             if (u < 0)
@@ -439,11 +476,9 @@ router.post(
             sumUnits += u;
           }
           if (sumUnits !== qty) {
-            return res
-              .status(400)
-              .json({
-                error: `Sum of perPersonCount (${sumUnits}) must equal quantity (${qty}) for item ${id}`,
-              });
+            return res.status(400).json({
+              error: `Sum of perPersonCount (${sumUnits}) must equal quantity (${qty}) for item ${id}`,
+            });
           }
           for (const [pid, units] of Object.entries(counts)) {
             const u = Number(units) || 0;
@@ -462,19 +497,15 @@ router.post(
         } else if (splitMode === "equal") {
           const assigned = Array.isArray(raw.assignedTo) ? raw.assignedTo : [];
           if (assigned.length === 0) {
-            return res
-              .status(400)
-              .json({
-                error: `assignedTo required for equal split item ${id}`,
-              });
+            return res.status(400).json({
+              error: `assignedTo required for equal split item ${id}`,
+            });
           }
           const valid = assigned.filter((pid) => participantIndex.has(pid));
           if (valid.length !== assigned.length) {
-            return res
-              .status(400)
-              .json({
-                error: `Unknown participant in assignedTo for item ${id}`,
-              });
+            return res.status(400).json({
+              error: `Unknown participant in assignedTo for item ${id}`,
+            });
           }
           const ratio = 1 / valid.length;
           let allocated = 0;
@@ -498,11 +529,9 @@ router.post(
             );
           });
         } else {
-          return res
-            .status(400)
-            .json({
-              error: `Unsupported splitMode '${splitMode}' for item ${id}`,
-            });
+          return res.status(400).json({
+            error: `Unsupported splitMode '${splitMode}' for item ${id}`,
+          });
         }
       }
 
@@ -512,6 +541,11 @@ router.post(
         username: p.username,
         amountOwed: round2(byParticipantTotals.get(p.uniqueId) || 0),
       }));
+
+      if (process.env.DEBUG_PARSE === "1") {
+        console.log("[finalize] byItem=", byItem);
+        console.log("[finalize] byParticipant=", byParticipant);
+      }
 
       return res.json({
         sessionId: Number(sessionId),
