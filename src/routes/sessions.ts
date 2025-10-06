@@ -301,4 +301,235 @@ router.patch(
   }
 );
 
+/**
+ * @swagger
+ * /sessions/finalize:
+ *   post:
+ *     summary: Finalize a session by computing allocations for provided items & participants (purely computational for now)
+ *     tags: [Sessions]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [sessionId, participants, items]
+ *             properties:
+ *               sessionId: { type: integer }
+ *               sessionName: { type: string }
+ *               participants:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [uniqueId, username]
+ *                   properties:
+ *                     uniqueId: { type: string }
+ *                     username: { type: string }
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   required: [id, name, price, quantity, splitMode]
+ *                   properties:
+ *                     id: { type: string }
+ *                     name: { type: string }
+ *                     price: { type: number }
+ *                     quantity: { type: number }
+ *                     kind: { type: string, nullable: true }
+ *                     splitMode: { type: string, enum: [equal, count] }
+ *                     perPersonCount: { type: object, additionalProperties: { type: number } }
+ *                     assignedTo: { type: array, items: { type: string } }
+ *     responses:
+ *       200:
+ *         description: Finalized allocations
+ */
+router.post(
+  "/finalize",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const { sessionId, sessionName, participants, items } = req.body || {};
+      if (!Number.isFinite(Number(sessionId))) {
+        return res.status(400).json({ error: "sessionId required" });
+      }
+      if (!Array.isArray(participants) || participants.length === 0) {
+        return res.status(400).json({ error: "participants array required" });
+      }
+      if (!Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: "items array required" });
+      }
+
+      const session = await prisma.session.findUnique({
+        where: { id: Number(sessionId) },
+        select: { id: true, creatorId: true, createdAt: true },
+      });
+      if (!session) return res.status(404).json({ error: "Session not found" });
+      if (session.creatorId !== req.user.id) {
+        return res.status(403).json({ error: "Forbidden" });
+      }
+
+      interface ParticipantInfo {
+        uniqueId: string;
+        username: string;
+      }
+      interface ItemInput {
+        id: string;
+        name: string;
+        price: number;
+        quantity: number;
+        kind?: string;
+        splitMode: "equal" | "count";
+        perPersonCount?: Record<string, number>;
+        assignedTo?: string[];
+      }
+      const pList: ParticipantInfo[] = participants.map((p: any) => ({
+        uniqueId: String(p.uniqueId),
+        username: String(p.username || p.uniqueId),
+      }));
+      const participantIndex = new Map<string, ParticipantInfo>();
+      for (const p of pList) participantIndex.set(p.uniqueId, p);
+
+      const allocs: any[] = [];
+      const byParticipantTotals = new Map<string, number>();
+      const byItem: { itemId: string; name: string; total: number }[] = [];
+
+      function round2(n: number) {
+        return Math.round(n * 100) / 100;
+      }
+
+      for (const raw of items as ItemInput[]) {
+        if (!raw || typeof raw !== "object") continue;
+        const { id, name, price, quantity, splitMode } = raw;
+        const unitPrice = Number(price);
+        const qty = Number(quantity);
+        if (
+          !id ||
+          !name ||
+          !Number.isFinite(unitPrice) ||
+          !Number.isFinite(qty) ||
+          qty <= 0
+        ) {
+          return res
+            .status(400)
+            .json({ error: `Invalid item fields for id=${id}` });
+        }
+        const itemTotal = round2(unitPrice * qty);
+        byItem.push({ itemId: id, name, total: itemTotal });
+
+        if (splitMode === "count") {
+          const counts = raw.perPersonCount || {};
+          // Validate participants
+          let sumUnits = 0;
+          for (const [pid, units] of Object.entries(counts)) {
+            if (!participantIndex.has(pid)) {
+              return res
+                .status(400)
+                .json({
+                  error: `Unknown participant in perPersonCount: ${pid}`,
+                });
+            }
+            const u = Number(units) || 0;
+            if (u < 0)
+              return res
+                .status(400)
+                .json({ error: `Negative units for ${pid}` });
+            sumUnits += u;
+          }
+          if (sumUnits !== qty) {
+            return res
+              .status(400)
+              .json({
+                error: `Sum of perPersonCount (${sumUnits}) must equal quantity (${qty}) for item ${id}`,
+              });
+          }
+          for (const [pid, units] of Object.entries(counts)) {
+            const u = Number(units) || 0;
+            const shareAmount = round2(u * unitPrice);
+            allocs.push({
+              itemId: id,
+              participantId: pid,
+              shareUnits: u,
+              shareAmount,
+            });
+            byParticipantTotals.set(
+              pid,
+              round2((byParticipantTotals.get(pid) || 0) + shareAmount)
+            );
+          }
+        } else if (splitMode === "equal") {
+          const assigned = Array.isArray(raw.assignedTo) ? raw.assignedTo : [];
+          if (assigned.length === 0) {
+            return res
+              .status(400)
+              .json({
+                error: `assignedTo required for equal split item ${id}`,
+              });
+          }
+          const valid = assigned.filter((pid) => participantIndex.has(pid));
+          if (valid.length !== assigned.length) {
+            return res
+              .status(400)
+              .json({
+                error: `Unknown participant in assignedTo for item ${id}`,
+              });
+          }
+          const ratio = 1 / valid.length;
+          let allocated = 0;
+          valid.forEach((pid, idx) => {
+            let shareAmount = unitPrice * qty * ratio; // raw
+            if (idx === valid.length - 1) {
+              // last one gets the remainder to avoid rounding drift
+              shareAmount = unitPrice * qty - allocated;
+            }
+            shareAmount = round2(shareAmount);
+            allocated = round2(allocated + shareAmount);
+            allocs.push({
+              itemId: id,
+              participantId: pid,
+              shareRatio: ratio,
+              shareAmount,
+            });
+            byParticipantTotals.set(
+              pid,
+              round2((byParticipantTotals.get(pid) || 0) + shareAmount)
+            );
+          });
+        } else {
+          return res
+            .status(400)
+            .json({
+              error: `Unsupported splitMode '${splitMode}' for item ${id}`,
+            });
+        }
+      }
+
+      const grandTotal = round2(byItem.reduce((s, it) => s + it.total, 0));
+      const byParticipant = pList.map((p) => ({
+        uniqueId: p.uniqueId,
+        username: p.username,
+        amountOwed: round2(byParticipantTotals.get(p.uniqueId) || 0),
+      }));
+
+      return res.json({
+        sessionId: Number(sessionId),
+        sessionName: sessionName || null,
+        status: "finalized",
+        createdAt: session.createdAt,
+        totals: {
+          grandTotal,
+          byParticipant,
+          byItem,
+        },
+        allocations: allocs,
+      });
+    } catch (err) {
+      console.error("POST /sessions/finalize error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
 export default router;
