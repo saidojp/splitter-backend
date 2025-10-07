@@ -395,13 +395,8 @@ router.post(
       for (const p of pList) participantIndex.set(p.uniqueId, p);
 
       const allocs: any[] = [];
-      const byParticipantTotals = new Map<string, number>();
-      const byItem: Array<{
-        itemId: string;
-        name: string;
-        total: number;
-        kind?: string | undefined;
-      }> = [];
+      // We'll derive totals AFTER generating allocations to have a single source of truth.
+      const itemMeta = new Map<string, { name: string; kind?: string }>();
 
       function round2(n: number) {
         return Math.round(n * 100) / 100;
@@ -445,17 +440,10 @@ router.post(
             .status(400)
             .json({ error: `Invalid item fields for id=${id}` });
         }
-        const itemTotal = round2(
-          Number(
-            raw.totalPrice != null && Number.isFinite(Number(raw.totalPrice))
-              ? raw.totalPrice
-              : unitPrice * qty
-          )
-        );
         if (raw.kind != null) {
-          byItem.push({ itemId: id, name, total: itemTotal, kind: raw.kind });
+          itemMeta.set(id, { name, kind: raw.kind });
         } else {
-          byItem.push({ itemId: id, name, total: itemTotal });
+          itemMeta.set(id, { name });
         }
 
         if (splitMode === "count") {
@@ -489,10 +477,7 @@ router.post(
               shareUnits: u,
               shareAmount,
             });
-            byParticipantTotals.set(
-              pid,
-              round2((byParticipantTotals.get(pid) || 0) + shareAmount)
-            );
+            // participant totals will be derived later
           }
         } else if (splitMode === "equal") {
           const assigned = Array.isArray(raw.assignedTo) ? raw.assignedTo : [];
@@ -523,10 +508,7 @@ router.post(
               shareRatio: ratio,
               shareAmount,
             });
-            byParticipantTotals.set(
-              pid,
-              round2((byParticipantTotals.get(pid) || 0) + shareAmount)
-            );
+            // participant totals will be derived later
           });
         } else {
           return res.status(400).json({
@@ -535,16 +517,42 @@ router.post(
         }
       }
 
+      // Derive totals from allocations
+      const byItemMap = new Map<
+        string,
+        { itemId: string; name: string; total: number; kind?: string }
+      >();
+      const byParticipantTotals = new Map<string, number>();
+      for (const a of allocs) {
+        const itemId = a.itemId;
+        const shareAmount = Number(a.shareAmount) || 0;
+        if (!byItemMap.has(itemId)) {
+          const meta = itemMeta.get(itemId);
+          byItemMap.set(itemId, {
+            itemId,
+            name: meta?.name || itemId,
+            total: 0,
+            ...(meta?.kind ? { kind: meta.kind } : {}),
+          });
+        }
+        const entry = byItemMap.get(itemId)!;
+        entry.total = round2(entry.total + shareAmount);
+        const pid = a.participantId;
+        byParticipantTotals.set(
+          pid,
+          round2((byParticipantTotals.get(pid) || 0) + shareAmount)
+        );
+      }
+      const byItem = Array.from(byItemMap.values());
       const grandTotal = round2(byItem.reduce((s, it) => s + it.total, 0));
       const byParticipant = pList.map((p) => ({
         uniqueId: p.uniqueId,
         username: p.username,
         amountOwed: round2(byParticipantTotals.get(p.uniqueId) || 0),
       }));
-
       if (process.env.DEBUG_PARSE === "1") {
-        console.log("[finalize] byItem=", byItem);
-        console.log("[finalize] byParticipant=", byParticipant);
+        console.log("[finalize] derived byItem=", byItem);
+        console.log("[finalize] derived byParticipant=", byParticipant);
       }
 
       return res.json({
