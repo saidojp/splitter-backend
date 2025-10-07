@@ -36,6 +36,9 @@ model User {
 
   // Assignments
   itemAssignments ItemAssignment[]
+
+  // History (sessions where user is owner snapshot)
+  ownedHistoryEntries SessionHistoryEntry[] @relation("OwnerUserHistory")
 }
 
 enum FriendshipStatus {
@@ -106,6 +109,9 @@ model Session {
   group     Group?  @relation(fields: [groupId], references: [id])
   participants SessionParticipant[]
   items        ReceiptItem[]
+
+  // One-to-one snapshot history (created after finalize)
+  historyEntry SessionHistoryEntry? @relation("SessionHistory")
 }
 
 model SessionParticipant {
@@ -141,20 +147,20 @@ model ItemAssignment {
 
 // Snapshot of a finalized session (immutable history record)
 model SessionHistoryEntry {
-  id                 Int      @id @default(autoincrement())
-  sessionId          Int      @unique
-  session            Session  @relation(fields: [sessionId], references: [id])
-  sessionName        String?
-  createdAt          DateTime @default(now())
-  status             String   // e.g. "finalized"
-  ownerUserId        Int?
-  ownerUser          User?    @relation(fields: [ownerUserId], references: [id])
-  ownerUniqueId      String?  // snapshot of owner's uniqueId (for convenience)
-  ownerUsername      String?  // snapshot of owner's username
+  id                  Int      @id @default(autoincrement())
+  sessionId           Int      @unique
+  session             Session  @relation("SessionHistory", fields: [sessionId], references: [id])
+  sessionName         String?
+  createdAt           DateTime @default(now())
+  status              String   // e.g. "finalized"
+  ownerUserId         Int?
+  ownerUser           User?    @relation("OwnerUserHistory", fields: [ownerUserId], references: [id])
+  ownerUniqueId       String?  // snapshot of owner's uniqueId (for convenience)
+  ownerUsername       String?  // snapshot of owner's username
   participantUniqueIds String[]
-  participants       Json     // [{ uniqueId, username }]
-  allocations        Json     // allocation rows
-  totals             Json     // { grandTotal, byItem, byParticipant }
+  participants        Json     // [{ uniqueId, username }]
+  allocations         Json     // allocation rows
+  totals              Json     // { grandTotal, byItem, byParticipant }
 
   @@index([ownerUserId])
   @@index([status])
