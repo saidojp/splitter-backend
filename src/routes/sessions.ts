@@ -555,6 +555,39 @@ router.post(
         console.log("[finalize] derived byParticipant=", byParticipant);
       }
 
+      // Persist snapshot to SessionHistory (idempotent: skip if exists)
+      try {
+        // @ts-ignore prisma client accessor generated after running `prisma migrate dev`
+        const existing = await prisma.sessionHistoryEntry.findUnique({
+          where: { sessionId: Number(sessionId) },
+          select: { id: true },
+        });
+        if (!existing) {
+          // Fetch owner user info (creator of session)
+          const owner = await prisma.user.findUnique({
+            where: { id: session.creatorId },
+            select: { id: true, uniqueId: true, username: true },
+          });
+          // @ts-ignore prisma client accessor generated after running `prisma migrate dev`
+          await prisma.sessionHistoryEntry.create({
+            data: {
+              sessionId: Number(sessionId),
+              sessionName: sessionName || null,
+              status: "finalized",
+              ownerUserId: owner?.id || null,
+              ownerUniqueId: owner?.uniqueId || null,
+              ownerUsername: owner?.username || null,
+              participantUniqueIds: pList.map((p) => p.uniqueId),
+              participants: pList,
+              allocations: allocs,
+              totals: { grandTotal, byItem, byParticipant },
+            },
+          });
+        }
+      } catch (e) {
+        console.error("[finalize] failed to persist SessionHistory:", e);
+      }
+
       return res.json({
         sessionId: Number(sessionId),
         sessionName: sessionName || null,
@@ -575,3 +608,63 @@ router.post(
 );
 
 export default router;
+
+// History endpoint (lightweight implementation)
+router.get(
+  "/history",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const participantId = (req.query.participantId as string) || null;
+      // We'll match by uniqueId snapshot. Need to fetch current user's uniqueId if no participantId
+      let targetUniqueId = participantId;
+      if (!targetUniqueId) {
+        const me = await prisma.user.findUnique({
+          where: { id: req.user.id },
+          select: { uniqueId: true },
+        });
+        if (!me) return res.status(404).json({ error: "User not found" });
+        targetUniqueId = me.uniqueId;
+      }
+      // @ts-ignore prisma client needs regeneration after adding model
+      // @ts-ignore prisma client accessor generated after running `prisma migrate dev`
+      const entries = await prisma.sessionHistoryEntry.findMany({
+        where: {
+          participantUniqueIds: { has: targetUniqueId },
+          status: "finalized",
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      const sessions = entries.map((e: any) => {
+        // derive myTotal from totals.byParticipant if present
+        let myTotal: number | undefined;
+        try {
+          const byP = e.totals?.byParticipant || [];
+          const mine = byP.find((p: any) => p.uniqueId === targetUniqueId);
+          myTotal = mine?.amountOwed;
+        } catch {}
+        return {
+          sessionId: e.sessionId,
+          sessionName: e.sessionName,
+          createdAt: e.createdAt,
+          status: e.status,
+          ownerId: e.ownerUniqueId || null,
+          ownerName: e.ownerUsername || null,
+          totals: {
+            myTotal,
+            grandTotal: e.totals?.grandTotal,
+          },
+          participants: e.participants,
+          allocations: e.allocations,
+          byItem: e.totals?.byItem || [],
+          byParticipant: e.totals?.byParticipant || [],
+        };
+      });
+      return res.json({ participantId: targetUniqueId, sessions });
+    } catch (err) {
+      console.error("GET /sessions/history error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);

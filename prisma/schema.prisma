@@ -138,3 +138,25 @@ model ItemAssignment {
 
   @@id([itemId, userId])
 }
+
+// Snapshot of a finalized session (immutable history record)
+model SessionHistoryEntry {
+  id                 Int      @id @default(autoincrement())
+  sessionId          Int      @unique
+  session            Session  @relation(fields: [sessionId], references: [id])
+  sessionName        String?
+  createdAt          DateTime @default(now())
+  status             String   // e.g. "finalized"
+  ownerUserId        Int?
+  ownerUser          User?    @relation(fields: [ownerUserId], references: [id])
+  ownerUniqueId      String?  // snapshot of owner's uniqueId (for convenience)
+  ownerUsername      String?  // snapshot of owner's username
+  participantUniqueIds String[]
+  participants       Json     // [{ uniqueId, username }]
+  allocations        Json     // allocation rows
+  totals             Json     // { grandTotal, byItem, byParticipant }
+
+  @@index([ownerUserId])
+  @@index([status])
+  @@index([createdAt])
+}
