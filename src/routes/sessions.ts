@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { Response } from "express";
 import { prisma } from "../config/prisma.js";
+import type { Prisma } from "@prisma/client";
 import { authenticateToken, type AuthRequest } from "../middleware/auth.js";
 import { parseReceipt } from "../services/receiptParser.js";
 
@@ -578,9 +579,13 @@ router.post(
               ownerUniqueId: owner?.uniqueId || null,
               ownerUsername: owner?.username || null,
               participantUniqueIds: pList.map((p) => p.uniqueId),
-              participants: pList,
-              allocations: allocs,
-              totals: { grandTotal, byItem, byParticipant },
+              participants: pList as unknown as Prisma.InputJsonValue,
+              allocations: allocs as unknown as Prisma.InputJsonValue,
+              totals: {
+                grandTotal,
+                byItem,
+                byParticipant,
+              } as unknown as Prisma.InputJsonValue,
             },
           });
         }
