@@ -615,6 +615,108 @@ router.post(
 export default router;
 
 // History endpoint (lightweight implementation)
+/**
+ * @swagger
+ * /sessions/history:
+ *   get:
+ *     summary: Get finalized sessions history for a participant (by uniqueId) or current user if not provided
+ *     tags: [Sessions]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: participantId
+ *         schema:
+ *           type: string
+ *         required: false
+ *         description: Participant uniqueId (e.g., "#5281"). If omitted, backend uses current user's uniqueId.
+ *     responses:
+ *       200:
+ *         description: History payload
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 participantId:
+ *                   type: string
+ *                 sessions:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       sessionId: { type: integer }
+ *                       sessionName: { type: string, nullable: true }
+ *                       createdAt: { type: string, format: date-time }
+ *                       status: { type: string }
+ *                       ownerId: { type: string, nullable: true }
+ *                       ownerName: { type: string, nullable: true }
+ *                       totals:
+ *                         type: object
+ *                         properties:
+ *                           myTotal: { type: number, nullable: true }
+ *                           grandTotal: { type: number }
+ *                       participants:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             uniqueId: { type: string }
+ *                             username: { type: string }
+ *                       allocations:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             itemId: { type: string }
+ *                             participantId: { type: string }
+ *                             shareUnits: { type: number, nullable: true }
+ *                             shareRatio: { type: number, nullable: true }
+ *                             shareAmount: { type: number }
+ *                       byItem:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             itemId: { type: string }
+ *                             name: { type: string }
+ *                             total: { type: number }
+ *                             kind: { type: string, nullable: true }
+ *                       byParticipant:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             uniqueId: { type: string }
+ *                             username: { type: string }
+ *                             amountOwed: { type: number }
+ *             examples:
+ *               sample:
+ *                 summary: Example history response
+ *                 value:
+ *                   participantId: "#5281"
+ *                   sessions:
+ *                     - sessionId: 21
+ *                       sessionName: "2025-10-07 21:43"
+ *                       createdAt: "2025-10-07T16:55:20.901Z"
+ *                       status: "finalized"
+ *                       ownerId: "#5281"
+ *                       ownerName: "said"
+ *                       totals:
+ *                         myTotal: 18750
+ *                         grandTotal: 33500
+ *                       participants:
+ *                         - { uniqueId: "#5281", username: "said" }
+ *                         - { uniqueId: "#5347", username: "said2" }
+ *                       allocations:
+ *                         - { itemId: "1", participantId: "#5281", shareAmount: 500, shareUnits: 1 }
+ *                         - { itemId: "1", participantId: "#5347", shareAmount: 500, shareUnits: 1 }
+ *                       byItem:
+ *                         - { itemId: "1", name: "Кола", total: 1000 }
+ *                       byParticipant:
+ *                         - { uniqueId: "#5281", username: "said", amountOwed: 18750 }
+ *                         - { uniqueId: "#5347", username: "said2", amountOwed: 14750 }
+ */
 router.get(
   "/history",
   authenticateToken,
