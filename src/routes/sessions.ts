@@ -696,6 +696,116 @@ export default router;
 // History endpoint (lightweight implementation)
 /**
  * @swagger
+ * /sessions/{sessionId}/history:
+ *   get:
+ *     summary: Get history snapshot for a specific session
+ *     tags: [Sessions]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: sessionId
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Snapshot if exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               oneOf:
+ *                 - type: object
+ *                   properties:
+ *                     exists: { type: boolean, enum: [false] }
+ *                     sessionId: { type: integer }
+ *                 - type: object
+ *                   properties:
+ *                     exists: { type: boolean, enum: [true] }
+ *                     sessionId: { type: integer }
+ *                     sessionName: { type: string, nullable: true }
+ *                     createdAt: { type: string, format: date-time }
+ *                     status: { type: string }
+ *                     ownerId: { type: string, nullable: true }
+ *                     ownerName: { type: string, nullable: true }
+ *                     totals:
+ *                       type: object
+ *                       properties:
+ *                         grandTotal: { type: number }
+ *                         byItem: { type: array, items: { type: object } }
+ *                         byParticipant: { type: array, items: { type: object } }
+ *                     participants:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           uniqueId: { type: string }
+ *                           username: { type: string }
+ *                           avatarUrl: { type: string, nullable: true }
+ *                     allocations:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           itemId: { type: string }
+ *                           participantId: { type: string }
+ *                           shareAmount: { type: number }
+ *                           shareUnits: { type: number, nullable: true }
+ *                           shareRatio: { type: number, nullable: true }
+ */
+router.get(
+  "/:sessionId/history",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const sessionId = Number(req.params.sessionId);
+      if (!Number.isFinite(sessionId))
+        return res.status(400).json({ error: "Invalid sessionId" });
+      // @ts-ignore prisma client accessor generated after running `prisma migrate dev`
+      const entry = await prisma.sessionHistoryEntry.findUnique({
+        where: { sessionId },
+      });
+      if (!entry) {
+        return res.json({ exists: false, sessionId });
+      }
+      // propagate avatarUrl into byParticipant if missing
+      try {
+        if (
+          Array.isArray(entry.participants) &&
+          Array.isArray((entry as any).totals?.byParticipant)
+        ) {
+          const avatarMap = new Map<string, string | null>();
+          for (const p of entry.participants as any[]) {
+            if (p && p.uniqueId) avatarMap.set(p.uniqueId, p.avatarUrl || null);
+          }
+          for (const bp of (entry as any).totals.byParticipant) {
+            if (bp && bp.uniqueId && bp.avatarUrl === undefined) {
+              bp.avatarUrl = avatarMap.get(bp.uniqueId) || null;
+            }
+          }
+        }
+      } catch {}
+      return res.json({
+        exists: true,
+        sessionId: entry.sessionId,
+        sessionName: entry.sessionName,
+        createdAt: entry.createdAt,
+        status: entry.status,
+        ownerId: entry.ownerUniqueId || null,
+        ownerName: entry.ownerUsername || null,
+        totals: entry.totals,
+        participants: entry.participants,
+        allocations: entry.allocations,
+      });
+    } catch (err) {
+      console.error("GET /sessions/:sessionId/history error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
  * /sessions/history:
  *   get:
  *     summary: Get finalized sessions history for a participant (by uniqueId) or current user if not provided
