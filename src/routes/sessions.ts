@@ -984,3 +984,132 @@ router.get(
     }
   }
 );
+
+/**
+ * @swagger
+ * /sessions/history/latest:
+ *   get:
+ *     summary: Get most recent finalized session snapshots for current user (as participant)
+ *     tags: [Sessions]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 10, minimum: 1, maximum: 100 }
+ *         required: false
+ *         description: Max number of sessions to return (default 10, max 100)
+ *     responses:
+ *       200:
+ *         description: Latest history snapshots
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 limit: { type: integer }
+ *                 count: { type: integer }
+ *                 sessions:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       sessionId: { type: integer }
+ *                       sessionName: { type: string, nullable: true }
+ *                       createdAt: { type: string, format: date-time }
+ *                       status: { type: string }
+ *                       ownerId: { type: string, nullable: true }
+ *                       ownerName: { type: string, nullable: true }
+ *                       totals:
+ *                         type: object
+ *                         properties:
+ *                           grandTotal: { type: number }
+ *                           byItem: { type: array, items: { type: object } }
+ *                           byParticipant: { type: array, items: { type: object } }
+ *                       participants:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             uniqueId: { type: string }
+ *                             username: { type: string }
+ *                             avatarUrl: { type: string, nullable: true }
+ *                       allocations:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             itemId: { type: string }
+ *                             participantId: { type: string }
+ *                             shareAmount: { type: number }
+ *                             shareUnits: { type: number, nullable: true }
+ *                             shareRatio: { type: number, nullable: true }
+ *             examples:
+ *               sample:
+ *                 summary: Example latest history response
+ *                 value:
+ *                   limit: 3
+ *                   count: 2
+ *                   sessions:
+ *                     - { sessionId: 25, sessionName: "Dinner", createdAt: "2025-10-14T12:00:00.000Z", status: "finalized" }
+ *                     - { sessionId: 24, sessionName: "Lunch", createdAt: "2025-10-14T10:30:00.000Z", status: "finalized" }
+ */
+router.get(
+  "/history/latest",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const limitRaw = req.query.limit as string | undefined;
+      let limit = Number(limitRaw ?? 10);
+      if (!Number.isFinite(limit) || limit <= 0) limit = 10;
+      if (limit > 100) limit = 100;
+      const me = await prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: { uniqueId: true },
+      });
+      if (!me) return res.status(404).json({ error: "User not found" });
+      // @ts-ignore prisma client accessor generated after running `prisma migrate dev`
+      const entries = await prisma.sessionHistoryEntry.findMany({
+        where: {
+          participantUniqueIds: { has: me.uniqueId },
+          status: "finalized",
+        },
+        orderBy: { createdAt: "desc" },
+        take: limit,
+      });
+      const sessions = entries.map((e: any) => {
+        // propagate avatar into byParticipant if needed
+        try {
+          if (
+            Array.isArray(e.participants) &&
+            Array.isArray(e.totals?.byParticipant)
+          ) {
+            const avatarMap = new Map<string, string | null>();
+            for (const p of e.participants)
+              if (p && p.uniqueId)
+                avatarMap.set(p.uniqueId, p.avatarUrl || null);
+            for (const bp of e.totals.byParticipant)
+              if (bp && bp.uniqueId && bp.avatarUrl === undefined)
+                bp.avatarUrl = avatarMap.get(bp.uniqueId) || null;
+          }
+        } catch {}
+        return {
+          sessionId: e.sessionId,
+          sessionName: e.sessionName,
+          createdAt: e.createdAt,
+          status: e.status,
+          ownerId: e.ownerUniqueId || null,
+          ownerName: e.ownerUsername || null,
+          totals: e.totals,
+          participants: e.participants,
+          allocations: e.allocations,
+        };
+      });
+      return res.json({ limit, count: sessions.length, sessions });
+    } catch (err) {
+      console.error("GET /sessions/history/latest error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
