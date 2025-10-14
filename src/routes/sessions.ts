@@ -90,11 +90,15 @@ router.post(
           .json({ error: "image { mimeType, data } required" });
       }
 
-      // Create session (name field exists in schema but older DB may lack column; ignore until migration applied)
+      const acceptedAt = new Date();
+      // Create session recording acceptance time
+      // @ts-ignore new field parseAcceptedAt will exist after prisma generate
       const session = await prisma.session.create({
         data: {
           creatorId: req.user.id,
           status: "ACTIVE",
+          // @ts-ignore field generated after migrate
+          parseAcceptedAt: acceptedAt,
         },
         select: { id: true },
       });
@@ -105,6 +109,54 @@ router.post(
         mimeType: image.mimeType,
         imageBase64: image.data,
       });
+
+      const resultReturnedAt = new Date();
+      // Persist timing markers (best-effort, ignore failures)
+      try {
+        // We treat requestSentAt/responseReceivedAt as provided by parseResult
+        // @ts-ignore new timing fields until prisma generate
+        await prisma.session.update({
+          where: { id: session.id },
+          data: {
+            // @ts-ignore field generated after migrate
+            parseRequestSentAt: parseResult.requestSentAt
+              ? new Date(parseResult.requestSentAt)
+              : null,
+            // @ts-ignore field generated after migrate
+            parseResponseAt: parseResult.responseReceivedAt
+              ? new Date(parseResult.responseReceivedAt)
+              : null,
+            // @ts-ignore field generated after migrate
+            parseResultReturnedAt: resultReturnedAt,
+          },
+          select: { id: true },
+        });
+      } catch (e) {
+        console.warn("[scan] Failed to persist parse timing markers", e);
+      }
+
+      if (process.env.DEBUG_PARSE === "1") {
+        const reqSent = parseResult.requestSentAt
+          ? new Date(parseResult.requestSentAt)
+          : null;
+        const respRecv = parseResult.responseReceivedAt
+          ? new Date(parseResult.responseReceivedAt)
+          : null;
+        const tAcceptedToReq = reqSent
+          ? reqSent.getTime() - acceptedAt.getTime()
+          : undefined;
+        const tReqToResp =
+          reqSent && respRecv
+            ? respRecv.getTime() - reqSent.getTime()
+            : undefined;
+        const tRespToReturn = respRecv
+          ? resultReturnedAt.getTime() - respRecv.getTime()
+          : undefined;
+        const total = resultReturnedAt.getTime() - acceptedAt.getTime();
+        console.log(
+          `[timing][scan] session=${session.id} accepted->request=${tAcceptedToReq}ms request->response=${tReqToResp}ms response->return=${tRespToReturn}ms total=${total}ms`
+        );
+      }
 
       return res.json({
         sessionId: session.id,
@@ -121,6 +173,12 @@ router.post(
                 usedModelVersion: parseResult.usedModelVersion,
                 modelsTried: parseResult.modelsTried,
                 raw: parseResult.rawModelText,
+                timing: {
+                  acceptedAt: acceptedAt.toISOString(),
+                  requestSentAt: parseResult.requestSentAt,
+                  responseReceivedAt: parseResult.responseReceivedAt,
+                  resultReturnedAt: resultReturnedAt.toISOString(),
+                },
               },
             }
           : {}),

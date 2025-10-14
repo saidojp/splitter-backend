@@ -104,6 +104,11 @@ model Session {
   total          Decimal         @default(0)
   status         SessionStatus   @default(ACTIVE)
   createdAt      DateTime        @default(now())
+  // Receipt parsing timing markers
+  parseAcceptedAt       DateTime? // when /sessions/scan received request
+  parseRequestSentAt    DateTime? // when Gemini request sent
+  parseResponseAt       DateTime? // when Gemini JSON received (raw model text)
+  parseResultReturnedAt DateTime? // when API responded to client
 
   creator   User    @relation("SessionCreator", fields: [creatorId], references: [id])
   group     Group?  @relation(fields: [groupId], references: [id])

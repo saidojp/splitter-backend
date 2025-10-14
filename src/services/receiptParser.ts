@@ -19,6 +19,8 @@ export interface ParseResult {
   durationMs?: number | undefined;
   source: "gemini" | "mock";
   usedModelVersion?: string | undefined;
+  requestSentAt?: string; // ISO timestamps for timing instrumentation
+  responseReceivedAt?: string;
   modelsTried?:
     | Array<{
         model: string;
@@ -206,12 +208,14 @@ export async function parseReceipt(
     const start = Date.now();
     try {
       if (DEBUG_PARSE) console.log(`[parseReceipt] Trying model: ${modelName}`);
+      const reqSent = new Date();
       const text = await generateViaRest(
         modelName,
         prompt,
         imagePart.inlineData.data,
         imagePart.inlineData.mimeType
       );
+      const respReceived = new Date();
       const parsed = safeParseJson(text);
       if (!parsed.ok || !parsed.data) {
         if (DEBUG_PARSE) {
@@ -241,6 +245,8 @@ export async function parseReceipt(
         durationMs,
         rawModelText: truncated,
         usedModelVersion: lastUsedVersion,
+        requestSentAt: reqSent.toISOString(),
+        responseReceivedAt: respReceived.toISOString(),
         modelsTried: DEBUG_PARSE
           ? [
               ...modelsTried,
