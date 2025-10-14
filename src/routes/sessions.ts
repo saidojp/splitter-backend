@@ -375,6 +375,7 @@ router.post(
       interface ParticipantInfo {
         uniqueId: string;
         username: string;
+        avatarUrl?: string | null;
       }
       interface ItemInput {
         id: string;
@@ -391,6 +392,7 @@ router.post(
       const pList: ParticipantInfo[] = participants.map((p: any) => ({
         uniqueId: String(p.uniqueId),
         username: String(p.username || p.uniqueId),
+        avatarUrl: p.avatarUrl ?? null,
       }));
       const participantIndex = new Map<string, ParticipantInfo>();
       for (const p of pList) participantIndex.set(p.uniqueId, p);
@@ -569,6 +571,24 @@ router.post(
             where: { id: session.creatorId },
             select: { id: true, uniqueId: true, username: true },
           });
+          // Enrich participants with avatarUrl from DB if not provided in request
+          const missingAvatarIds = pList
+            .filter((p) => !p.avatarUrl)
+            .map((p) => p.uniqueId);
+          if (missingAvatarIds.length) {
+            const dbUsers = await prisma.user.findMany({
+              where: { uniqueId: { in: missingAvatarIds } },
+              select: { uniqueId: true, avatarUrl: true },
+            });
+            const avatarMap = new Map<string, string | null>(
+              dbUsers.map((u) => [u.uniqueId, u.avatarUrl || null])
+            );
+            for (const p of pList) {
+              if (!p.avatarUrl && avatarMap.has(p.uniqueId)) {
+                p.avatarUrl = avatarMap.get(p.uniqueId) || null;
+              }
+            }
+          }
           // @ts-ignore prisma client accessor generated after running `prisma migrate dev`
           await prisma.sessionHistoryEntry.create({
             data: {
@@ -604,6 +624,7 @@ router.post(
           byItem,
         },
         allocations: allocs,
+        participants: pList,
       });
     } catch (err) {
       console.error("POST /sessions/finalize error:", err);
@@ -663,6 +684,8 @@ export default router;
  *                           properties:
  *                             uniqueId: { type: string }
  *                             username: { type: string }
+ *                             avatarUrl: { type: string, nullable: true }
+ *                             avatarUrl: { type: string, nullable: true }
  *                       allocations:
  *                         type: array
  *                         items:
@@ -707,7 +730,7 @@ export default router;
  *                         grandTotal: 33500
  *                       participants:
  *                         - { uniqueId: "#5281", username: "said" }
- *                         - { uniqueId: "#5347", username: "said2" }
+ *                         - { uniqueId: "#5347", username: "said2", avatarUrl: null }
  *                       allocations:
  *                         - { itemId: "1", participantId: "#5281", shareAmount: 500, shareUnits: 1 }
  *                         - { itemId: "1", participantId: "#5347", shareAmount: 500, shareUnits: 1 }
@@ -715,7 +738,7 @@ export default router;
  *                         - { itemId: "1", name: "Кола", total: 1000 }
  *                       byParticipant:
  *                         - { uniqueId: "#5281", username: "said", amountOwed: 18750 }
- *                         - { uniqueId: "#5347", username: "said2", amountOwed: 14750 }
+ *                         - { uniqueId: "#5347", username: "said2", avatarUrl: null, amountOwed: 14750 }
  */
 router.get(
   "/history",
@@ -750,6 +773,24 @@ router.get(
           const byP = e.totals?.byParticipant || [];
           const mine = byP.find((p: any) => p.uniqueId === targetUniqueId);
           myTotal = mine?.amountOwed;
+        } catch {}
+        // propagate avatarUrl from participants array into byParticipant if missing
+        try {
+          if (
+            Array.isArray(e.participants) &&
+            Array.isArray(e.totals?.byParticipant)
+          ) {
+            const avatarMap = new Map<string, string | null>();
+            for (const p of e.participants) {
+              if (p && p.uniqueId)
+                avatarMap.set(p.uniqueId, p.avatarUrl || null);
+            }
+            for (const bp of e.totals.byParticipant) {
+              if (bp && bp.uniqueId && bp.avatarUrl === undefined) {
+                bp.avatarUrl = avatarMap.get(bp.uniqueId) || null;
+              }
+            }
+          }
         } catch {}
         return {
           sessionId: e.sessionId,
