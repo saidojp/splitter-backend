@@ -1,9 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,31 +8,97 @@ datasource db {
 }
 
 model User {
-  id        Int      @id @default(autoincrement())
-  email     String   @unique
-  password  String
-  username  String
-  uniqueId  String   @unique
-  avatarUrl String?
-  createdAt DateTime @default(now())
-
-  // Friendships
-  sentFriendships     Friendship[] @relation("UserFriendshipRequester")
-  receivedFriendships Friendship[] @relation("UserFriendshipReceiver")
-
-  // Groups
-  ownedGroups     Group[]       @relation("GroupOwner")
-  groupMemberships GroupMember[]
-
-  // Sessions
+  id                  Int                  @id @default(autoincrement())
+  email               String               @unique
+  password            String
+  username            String
+  uniqueId            String               @unique
+  createdAt           DateTime             @default(now())
+  avatarUrl           String?
+  receivedFriendships Friendship[]         @relation("UserFriendshipReceiver")
+  sentFriendships     Friendship[]         @relation("UserFriendshipRequester")
+  ownedGroups         Group[]              @relation("GroupOwner")
+  groupMemberships    GroupMember[]
+  itemAssignments     ItemAssignment[]
   sessionsCreated     Session[]            @relation("SessionCreator")
   sessionParticipates SessionParticipant[]
+}
 
-  // Assignments
-  itemAssignments ItemAssignment[]
+model Friendship {
+  id          Int              @id @default(autoincrement())
+  requesterId Int
+  receiverId  Int
+  status      FriendshipStatus @default(PENDING)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  receiver    User             @relation("UserFriendshipReceiver", fields: [receiverId], references: [id])
+  requester   User             @relation("UserFriendshipRequester", fields: [requesterId], references: [id])
 
-  // History (sessions where user is owner snapshot)
-  ownedHistoryEntries SessionHistoryEntry[] @relation("OwnerUserHistory")
+  @@unique([requesterId, receiverId])
+}
+
+model Group {
+  id        Int           @id @default(autoincrement())
+  name      String
+  ownerId   Int
+  createdAt DateTime      @default(now())
+  owner     User          @relation("GroupOwner", fields: [ownerId], references: [id])
+  members   GroupMember[]
+  sessions  Session[]
+}
+
+model GroupMember {
+  groupId  Int
+  userId   Int
+  role     GroupRole @default(MEMBER)
+  joinedAt DateTime  @default(now())
+  group    Group     @relation(fields: [groupId], references: [id])
+  user     User      @relation(fields: [userId], references: [id])
+
+  @@id([groupId, userId])
+}
+
+model Session {
+  id              Int                  @id @default(autoincrement())
+  creatorId       Int
+  groupId         Int?
+  receiptImageUrl String?
+  serviceFee      Decimal              @default(0)
+  total           Decimal              @default(0)
+  status          SessionStatus        @default(ACTIVE)
+  createdAt       DateTime             @default(now())
+  items           ReceiptItem[]
+  creator         User                 @relation("SessionCreator", fields: [creatorId], references: [id])
+  group           Group?               @relation(fields: [groupId], references: [id])
+  participants    SessionParticipant[]
+}
+
+model SessionParticipant {
+  sessionId  Int
+  userId     Int
+  amountOwed Decimal @default(0)
+  session    Session @relation(fields: [sessionId], references: [id])
+  user       User    @relation(fields: [userId], references: [id])
+
+  @@id([sessionId, userId])
+}
+
+model ReceiptItem {
+  id          Int              @id @default(autoincrement())
+  sessionId   Int
+  name        String
+  price       Decimal
+  assignments ItemAssignment[]
+  session     Session          @relation(fields: [sessionId], references: [id])
+}
+
+model ItemAssignment {
+  itemId Int
+  userId Int
+  item   ReceiptItem @relation(fields: [itemId], references: [id])
+  user   User        @relation(fields: [userId], references: [id])
+
+  @@id([itemId, userId])
 }
 
 enum FriendshipStatus {
@@ -48,121 +108,13 @@ enum FriendshipStatus {
   BLOCKED
 }
 
-model Friendship {
-  id          Int               @id @default(autoincrement())
-  requesterId Int
-  receiverId  Int
-  requester   User              @relation("UserFriendshipRequester", fields: [requesterId], references: [id])
-  receiver    User              @relation("UserFriendshipReceiver", fields: [receiverId], references: [id])
-  status      FriendshipStatus  @default(PENDING)
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-
-  @@unique([requesterId, receiverId])
-}
-
-model Group {
-  id        Int       @id @default(autoincrement())
-  name      String
-  ownerId   Int
-  owner     User      @relation("GroupOwner", fields: [ownerId], references: [id])
-  members   GroupMember[]
-  sessions  Session[]
-  createdAt DateTime  @default(now())
-}
-
 enum GroupRole {
   MEMBER
   ADMIN
-}
-
-model GroupMember {
-  groupId  Int
-  userId   Int
-  role     GroupRole @default(MEMBER)
-  joinedAt DateTime  @default(now())
-
-  group Group @relation(fields: [groupId], references: [id])
-  user  User  @relation(fields: [userId], references: [id])
-
-  @@id([groupId, userId])
 }
 
 enum SessionStatus {
   ACTIVE
   CLOSED
   CANCELED
-}
-
-model Session {
-  id             Int             @id @default(autoincrement())
-  creatorId      Int
-  groupId        Int?
-  name           String?
-  receiptImageUrl String?
-  serviceFee     Decimal         @default(0)
-  total          Decimal         @default(0)
-  status         SessionStatus   @default(ACTIVE)
-  createdAt      DateTime        @default(now())
-
-  creator   User    @relation("SessionCreator", fields: [creatorId], references: [id])
-  group     Group?  @relation(fields: [groupId], references: [id])
-  participants SessionParticipant[]
-  items        ReceiptItem[]
-
-  // One-to-one snapshot history (created after finalize)
-  historyEntry SessionHistoryEntry? @relation("SessionHistory")
-}
-
-model SessionParticipant {
-  sessionId Int
-  userId    Int
-  amountOwed Decimal @default(0)
-
-  session Session @relation(fields: [sessionId], references: [id])
-  user    User    @relation(fields: [userId], references: [id])
-
-  @@id([sessionId, userId])
-}
-
-model ReceiptItem {
-  id        Int     @id @default(autoincrement())
-  sessionId Int
-  name      String
-  price     Decimal
-
-  session     Session         @relation(fields: [sessionId], references: [id])
-  assignments ItemAssignment[]
-}
-
-model ItemAssignment {
-  itemId Int
-  userId Int
-
-  item ReceiptItem @relation(fields: [itemId], references: [id])
-  user User        @relation(fields: [userId], references: [id])
-
-  @@id([itemId, userId])
-}
-
-// Snapshot of a finalized session (immutable history record)
-model SessionHistoryEntry {
-  id                  Int      @id @default(autoincrement())
-  sessionId           Int      @unique
-  session             Session  @relation("SessionHistory", fields: [sessionId], references: [id])
-  sessionName         String?
-  createdAt           DateTime @default(now())
-  status              String   // e.g. "finalized"
-  ownerUserId         Int?
-  ownerUser           User?    @relation("OwnerUserHistory", fields: [ownerUserId], references: [id])
-  ownerUniqueId       String?  // snapshot of owner's uniqueId (for convenience)
-  ownerUsername       String?  // snapshot of owner's username
-  participantUniqueIds String[]
-  participants        Json     // [{ uniqueId, username }]
-  allocations         Json     // allocation rows
-  totals              Json     // { grandTotal, byItem, byParticipant }
-
-  @@index([ownerUserId])
-  @@index([status])
-  @@index([createdAt])
 }
