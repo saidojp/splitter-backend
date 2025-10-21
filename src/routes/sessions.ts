@@ -556,20 +556,143 @@ router.post(
         console.log("[finalize] derived byParticipant=", byParticipant);
       }
 
-      return res.json({
+      const createdAtIso = session.createdAt.toISOString();
+      const finalizedAt = new Date();
+      const finalizedAtIso = finalizedAt.toISOString();
+      const responsePayload = {
         sessionId: Number(sessionId),
         sessionName: sessionName || null,
         status: "finalized",
-        createdAt: session.createdAt,
+        createdAt: createdAtIso,
+        finalizedAt: finalizedAtIso,
         totals: {
           grandTotal,
           byParticipant,
           byItem,
         },
         allocations: allocs,
+      } satisfies Record<string, unknown>;
+
+      const participantUniqueIds = Array.from(
+        new Set(byParticipant.map((p) => p.uniqueId))
+      ).sort();
+
+      await prisma.sessionHistoryEntry.upsert({
+        where: { sessionId: session.id },
+        create: {
+          sessionId: session.id,
+          creatorId: session.creatorId,
+          sessionName: sessionName ?? null,
+          payload: responsePayload as Prisma.JsonObject,
+          participantUniqueIds,
+          grandTotal: grandTotal.toString(),
+          finalizedAt,
+        },
+        update: {
+          sessionName: sessionName ?? null,
+          payload: responsePayload as Prisma.JsonObject,
+          participantUniqueIds,
+          grandTotal: grandTotal.toString(),
+          finalizedAt,
+        },
       });
+
+      return res.json(responsePayload);
     } catch (err) {
       console.error("POST /sessions/finalize error:", err);
+      return res.status(500).json({ error: "Server error" });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /sessions/history:
+ *   get:
+ *     summary: Session finalize history for the current user
+ *     tags: [Sessions]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: all
+ *         schema:
+ *           type: boolean
+ *         description: Return full history when true (defaults to latest 5)
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 50
+ *         description: Override default result size when not requesting all
+ *     responses:
+ *       200:
+ *         description: Session history entries
+ */
+router.get(
+  "/history",
+  authenticateToken,
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) return res.status(401).json({ error: "Unauthorized" });
+      const requesterId = req.user.id;
+
+      const userRecord = await prisma.user.findUnique({
+        where: { id: requesterId },
+        select: { uniqueId: true },
+      });
+      if (!userRecord) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      const allParam = String(req.query.all ?? "").toLowerCase();
+      const fetchAll = allParam === "1" || allParam === "true";
+
+      let limit = 5;
+      if (!fetchAll && req.query.limit != null) {
+        const parsed = Number(req.query.limit);
+        if (!Number.isFinite(parsed) || parsed <= 0) {
+          return res
+            .status(400)
+            .json({ error: "limit must be a positive integer" });
+        }
+        limit = Math.min(Math.trunc(parsed), 50);
+      }
+
+      const filters: Prisma.SessionHistoryEntryWhereInput[] = [
+        { creatorId: requesterId },
+      ];
+      if (userRecord.uniqueId) {
+        filters.push({ participantUniqueIds: { has: userRecord.uniqueId } });
+      }
+      const whereFilter: Prisma.SessionHistoryEntryWhereInput =
+        filters.length > 1 ? { OR: filters } : filters[0]!;
+
+      const entries = await prisma.sessionHistoryEntry.findMany({
+        where: whereFilter,
+        orderBy: { finalizedAt: "desc" },
+        ...(fetchAll ? {} : { take: limit }),
+      });
+
+      const response = entries.map((entry) => ({
+        sessionId: entry.sessionId,
+        sessionName: entry.sessionName,
+        finalizedAt: entry.finalizedAt.toISOString(),
+        grandTotal: entry.grandTotal.toNumber(),
+        participantUniqueIds: entry.participantUniqueIds,
+        isCreator: entry.creatorId === requesterId,
+        payload: entry.payload,
+      }));
+
+      return res.json({
+        scope: fetchAll ? "all" : "latest",
+        count: response.length,
+        limit: fetchAll ? null : limit,
+        entries: response,
+      });
+    } catch (err) {
+      console.error("GET /sessions/history error:", err);
       return res.status(500).json({ error: "Server error" });
     }
   }
