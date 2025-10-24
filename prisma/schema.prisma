@@ -83,6 +83,7 @@ model SessionHistoryEntry {
   payload               Json
   participantUniqueIds  String[]  @default([])
   grandTotal            Decimal   @default(0)
+  currency              String    @default("UNKNOWN")
   finalizedAt           DateTime  @default(now())
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt

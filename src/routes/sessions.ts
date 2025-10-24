@@ -7,6 +7,16 @@ import { parseReceipt } from "../services/receiptParser.js";
 
 const router = Router();
 
+const DEFAULT_CURRENCY_CODE = "UNKNOWN";
+
+function normalizeCurrencyCode(input: unknown): string {
+  if (typeof input !== "string") return DEFAULT_CURRENCY_CODE;
+  const trimmed = input.trim();
+  if (!trimmed) return DEFAULT_CURRENCY_CODE;
+  const upper = trimmed.toUpperCase();
+  return /^[A-Z]{3}$/.test(upper) ? upper : DEFAULT_CURRENCY_CODE;
+}
+
 /**
  * @swagger
  * /sessions/scan:
@@ -319,6 +329,7 @@ router.patch(
  *             type: object
  *             required: [sessionId, participants, items]
  *             properties:
+ *               currency: { type: string, example: "JPY", nullable: true }
  *               sessionId: { type: integer }
  *               sessionName: { type: string }
  *               participants:
@@ -346,6 +357,51 @@ router.patch(
  *     responses:
  *       200:
  *         description: Finalized allocations
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sessionId: { type: integer }
+ *                 sessionName: { type: string, nullable: true }
+ *                 status: { type: string }
+ *                 finalizedAt: { type: string, format: date-time }
+ *                 createdAt: { type: string, format: date-time }
+ *                 currency: { type: string }
+ *                 totals:
+ *                   type: object
+ *                   properties:
+ *                     currency: { type: string }
+ *                     grandTotal: { type: number }
+ *                     byParticipant:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           uniqueId: { type: string }
+ *                           username: { type: string }
+ *                           amountOwed: { type: number }
+ *                           participantId: { type: string }
+ *                           total: { type: number }
+ *                     byItem:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           itemId: { type: string }
+ *                           name: { type: string }
+ *                           total: { type: number }
+ *                           kind: { type: string, nullable: true }
+ *                 allocations:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       itemId: { type: string }
+ *                       participantId: { type: string }
+ *                       shareAmount: { type: number }
+ *                       shareRatio: { type: number, nullable: true }
+ *                       shareUnits: { type: number, nullable: true }
  */
 router.post(
   "/finalize",
@@ -354,6 +410,7 @@ router.post(
     try {
       if (!req.user) return res.status(401).json({ error: "Unauthorized" });
       const { sessionId, sessionName, participants, items } = req.body || {};
+      const currency = normalizeCurrencyCode(req.body?.currency);
       if (!Number.isFinite(Number(sessionId))) {
         return res.status(400).json({ error: "sessionId required" });
       }
@@ -547,11 +604,16 @@ router.post(
       }
       const byItem = Array.from(byItemMap.values());
       const grandTotal = round2(byItem.reduce((s, it) => s + it.total, 0));
-      const byParticipant = pList.map((p) => ({
-        uniqueId: p.uniqueId,
-        username: p.username,
-        amountOwed: round2(byParticipantTotals.get(p.uniqueId) || 0),
-      }));
+      const byParticipant = pList.map((p) => {
+        const amount = round2(byParticipantTotals.get(p.uniqueId) || 0);
+        return {
+          uniqueId: p.uniqueId,
+          username: p.username,
+          amountOwed: amount,
+          participantId: p.uniqueId,
+          total: amount,
+        };
+      });
       if (process.env.DEBUG_PARSE === "1") {
         console.log("[finalize] derived byItem=", byItem);
         console.log("[finalize] derived byParticipant=", byParticipant);
@@ -566,7 +628,9 @@ router.post(
         status: "finalized",
         createdAt: createdAtIso,
         finalizedAt: finalizedAtIso,
+        currency,
         totals: {
+          currency,
           grandTotal,
           byParticipant,
           byItem,
@@ -587,6 +651,7 @@ router.post(
           payload: responsePayload as Prisma.JsonObject,
           participantUniqueIds,
           grandTotal: grandTotal.toString(),
+          currency,
           finalizedAt,
         },
         update: {
@@ -594,6 +659,7 @@ router.post(
           payload: responsePayload as Prisma.JsonObject,
           participantUniqueIds,
           grandTotal: grandTotal.toString(),
+          currency,
           finalizedAt,
         },
       });
@@ -681,6 +747,7 @@ router.get(
         sessionName: entry.sessionName,
         finalizedAt: entry.finalizedAt.toISOString(),
         grandTotal: entry.grandTotal.toNumber(),
+        currency: entry.currency,
         participantUniqueIds: entry.participantUniqueIds,
         isCreator: entry.creatorId === requesterId,
         payload: entry.payload,
