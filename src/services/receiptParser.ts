@@ -13,7 +13,7 @@ export interface ParsedReceiptItem {
 
 export interface ParseResult {
   items: ParsedReceiptItem[];
-  summary: { grandTotal: number };
+  summary: { grandTotal: number; currency: string };
   rawModelText?: string | undefined; // for debugging (only when DEBUG_PARSE=1)
   model?: string | undefined; // which model was used
   durationMs?: number | undefined;
@@ -72,13 +72,92 @@ const DEBUG_PARSE = process.env.DEBUG_PARSE === "1";
 let cachedModel: { model: string; version: string } | null = null;
 let lastUsedVersion: string | undefined;
 
+const DEFAULT_CURRENCY_CODE = "UNKNOWN";
+const SYMBOL_TO_ISO: Record<string, string> = {
+  $: "USD",
+  USD: "USD",
+  US$: "USD",
+  "€": "EUR",
+  EUR: "EUR",
+  "£": "GBP",
+  GBP: "GBP",
+  "¥": "JPY",
+  JPY: "JPY",
+  円: "JPY",
+  "₽": "RUB",
+  RUB: "RUB",
+  RUR: "RUB",
+  РУБ: "RUB",
+  "РУБ.": "RUB",
+  "₴": "UAH",
+  UAH: "UAH",
+  "₩": "KRW",
+  KRW: "KRW",
+  "₦": "NGN",
+  NGN: "NGN",
+  "₹": "INR",
+  INR: "INR",
+  "₺": "TRY",
+  TRY: "TRY",
+  C$: "CAD",
+  CAD: "CAD",
+  A$: "AUD",
+  AUD: "AUD",
+  CHF: "CHF",
+  HK$: "HKD",
+  HKD: "HKD",
+  SG$: "SGD",
+  SGD: "SGD",
+  ZAR: "ZAR",
+};
+
+function normalizeCurrencyCode(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const directUpper = trimmed.toUpperCase();
+  if (SYMBOL_TO_ISO[trimmed]) return SYMBOL_TO_ISO[trimmed];
+  if (SYMBOL_TO_ISO[directUpper]) return SYMBOL_TO_ISO[directUpper];
+  if (/^[A-Z]{3}$/.test(directUpper)) return directUpper;
+  const asciiUpper = trimmed.replace(/[^A-Za-z]/g, "").toUpperCase();
+  if (SYMBOL_TO_ISO[asciiUpper]) return SYMBOL_TO_ISO[asciiUpper];
+  if (/^[A-Z]{3}$/.test(asciiUpper)) return asciiUpper;
+  const firstChar = trimmed[0];
+  if (firstChar && SYMBOL_TO_ISO[firstChar]) return SYMBOL_TO_ISO[firstChar];
+  const lastChar = trimmed[trimmed.length - 1];
+  if (lastChar && SYMBOL_TO_ISO[lastChar]) return SYMBOL_TO_ISO[lastChar];
+  return null;
+}
+
+function extractCurrencyCode(raw: any): string {
+  const candidates: unknown[] = [
+    raw?.summary?.currency,
+    raw?.summary?.currencyCode,
+    raw?.summary?.currency_code,
+    raw?.summary?.isoCurrency,
+    raw?.currency,
+    raw?.currencyCode,
+    raw?.currency_code,
+  ];
+  if (Array.isArray(raw?.items)) {
+    for (const item of raw.items) {
+      candidates.push(item?.currency, item?.currencyCode, item?.currency_code);
+    }
+  }
+  for (const candidate of candidates) {
+    const normalized = normalizeCurrencyCode(candidate);
+    if (normalized) return normalized;
+  }
+  return DEFAULT_CURRENCY_CODE;
+}
+
 // Extraction JSON schema instruction (lightweight, we rely on LLM following examples)
 const EXTRACTION_INSTRUCTIONS = `You are a receipt parser. Return ONLY valid JSON with this shape:
 {
   "items": [
     { "id": "string", "name": "string", "unitPrice": number, "quantity": number, "totalPrice": number, "kind": "fee|tip|discount|item|other|null" }
   ],
-  "summary": { "grandTotal": number }
+  "summary": { "grandTotal": number, "currency": "ISO_4217" }
 }
 Rules:
 - Numbers must use dot as decimal separator.
@@ -86,7 +165,9 @@ Rules:
 - quantity >= 1.
 - totalPrice = unitPrice * quantity (round to 2 decimals).
 - Include service/tips/fees as separate items with kind set.
-- If currency symbol present ignore it (store numeric only).
+- If currency symbol present ignore it when recording numbers.
+- Detect the receipt currency (e.g. symbols like $, €, ₽ or textual names) and report the ISO 4217 code in uppercase.
+- When unsure about currency, return "UNKNOWN".
 - grandTotal = sum of item totalPrice values (after any discounts).`;
 
 function safeParseJson(text: string): { ok: boolean; data?: ParseResult } {
@@ -116,9 +197,14 @@ function safeParseJson(text: string): { ok: boolean; data?: ParseResult } {
     const grandTotal = round2(
       items.reduce((s, i) => s + (Number(i.totalPrice) || 0), 0)
     );
+    const currency = extractCurrencyCode(raw);
     return {
       ok: true,
-      data: { items, summary: { grandTotal }, source: "gemini" } as ParseResult,
+      data: {
+        items,
+        summary: { grandTotal, currency },
+        source: "gemini",
+      } as ParseResult,
     };
   } catch {
     return { ok: false };
@@ -162,7 +248,11 @@ function mockParse(): ParseResult {
     },
   ];
   const grandTotal = items.reduce((s, i) => s + i.totalPrice, 0);
-  return { items, summary: { grandTotal }, source: "mock" };
+  return {
+    items,
+    summary: { grandTotal, currency: "RUB" },
+    source: "mock",
+  };
 }
 
 export async function parseReceipt(

@@ -65,6 +65,7 @@ const router = Router();
  *                   type: object
  *                   properties:
  *                     grandTotal: { type: number }
+ *                     currency: { type: string, nullable: true, example: "USD" }
  */
 router.post(
   "/scan",
